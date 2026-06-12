@@ -1,9 +1,29 @@
 name: swarm
-version: 0.1.0
-description: Multi-agent synthesis - parallel role-agents (codex/critic/dreamer) fused by a Synth agent. Hybrid of sal + possible-minds + v2_agi patterns.
+version: 0.2.0
+description: Multi-agent synthesis - parallel role-agents (codex/critic/dreamer) fused by a Synth agent. Governed by hard budget caps.
 entrypoint: swarm.py
 usage: "swarm.py [--verbose] [--roles codex,critic,dreamer] \"<prompt>\""
 triggers: ["swarm this", "get multiple perspectives", "synthesize answers", "braid"]
 requirements: {bins: [python3], files: [~/opencodeprojects/.env], services: [audit-proxy:8377]}
-permissions: [network, llm]
 interactive: false
+
+permissions:
+  network: true        # audit proxy only
+  llm: true
+  filesystem_write: true   # ~/.fable/swarm-history.jsonl only
+  shell_exec: false
+  contacts: false
+  messaging: false
+
+budget:
+  max_agents: 3                # SWARM_MAX_AGENTS
+  max_tokens_per_agent: 1200   # SWARM_MAX_TOKENS_PER_AGENT
+  max_synth_tokens: 2000       # SWARM_MAX_SYNTH_TOKENS
+  max_prompt_chars: 8000       # SWARM_MAX_PROMPT_CHARS
+  max_cost_usd: 0.25           # SWARM_MAX_COST_USD (per run)
+  daily_cost_usd: 2.00         # SWARM_DAILY_COST_USD
+
+audit:
+  log_prompts: true            # via audit proxy (hash-chained JSONL)
+  log_cost: true               # per-run cost in swarm-history.jsonl
+  require_human_confirmation_for: []

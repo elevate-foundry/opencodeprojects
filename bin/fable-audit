@@ -7,6 +7,7 @@ Usage:
   fable-audit export [--out F]   dump all events (chronological) as JSONL
   fable-audit rotate             gzip old daily logs, enforce retention
   fable-audit tokens [--date D]  aggregate token usage and cost (compare with Anthropic console)
+  fable-audit errors [--quiet]   list API error responses (4xx/5xx) with bodies; exit 1 if any
 """
 import argparse
 import gzip
@@ -82,6 +83,33 @@ def cmd_export(args):
     if args.out:
         out.close()
         print(f"exported to {args.out}", file=sys.stderr)
+
+
+def cmd_errors(args):
+    """Surface API error responses captured by the proxy (the full bodies the
+    TUI truncates). Exit 1 if any errors found — usable as a CI/smoke gate."""
+    found = 0
+    for _, _, e in iter_events():
+        if not e or e.get("event_type") != "api_response":
+            continue
+        status = (e.get("http") or {}).get("status")
+        body = e.get("response")
+        body_str = body if isinstance(body, str) else json.dumps(body or "")
+        is_error = (isinstance(status, int) and status >= 400) or '"type":"error"' in body_str.replace(" ", "")
+        if not is_error:
+            continue
+        found += 1
+        if not args.quiet:
+            print(f"--- {e['timestamp']}  model={e.get('model', '?')}  status={status}")
+            try:
+                parsed = json.loads(body_str) if isinstance(body_str, str) else body_str
+                err = parsed.get("error", {}) if isinstance(parsed, dict) else {}
+                print(f"    {err.get('type', '?')}: {err.get('message', body_str[:200])}")
+            except (json.JSONDecodeError, AttributeError):
+                print(f"    {body_str[:200]}")
+    if not args.quiet:
+        print(f"\n{found} API error(s) found" if found else "no API errors found")
+    sys.exit(1 if found else 0)
 
 
 def cmd_rotate(_args):
@@ -215,9 +243,11 @@ def main():
     sub.add_parser("rotate")
     p_tok = sub.add_parser("tokens")
     p_tok.add_argument("--date", help="filter to a specific date (YYYY-MM-DD)")
+    p_err = sub.add_parser("errors")
+    p_err.add_argument("--quiet", action="store_true", help="no output, exit code only")
     args = parser.parse_args()
     {"tail": cmd_tail, "verify": cmd_verify, "export": cmd_export,
-     "rotate": cmd_rotate, "tokens": cmd_tokens}[args.cmd](args)
+     "rotate": cmd_rotate, "tokens": cmd_tokens, "errors": cmd_errors}[args.cmd](args)
 
 
 if __name__ == "__main__":

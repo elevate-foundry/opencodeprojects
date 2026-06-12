@@ -574,6 +574,19 @@ phase7_smoke() {
   after="$(cat "$FABLE_AUDIT_DIR"/audit-*.jsonl 2>/dev/null | wc -l)"
   [ "$after" -gt "$before" ] || die "smoke test" "request succeeded but no audit events were written"
 
+  # end-to-end smoke through the real fable binary: exercises the Go SDK's
+  # request construction (params, timeouts), not just raw HTTP like curl.
+  # this is what caught nothing when curl passed but the SDK sent
+  # unsupported params (e.g. temperature on claude-fable-5).
+  log "  running end-to-end smoke via fable binary..."
+  local e2e_out
+  if e2e_out="$(ANTHROPIC_BASE_URL="http://127.0.0.1:${FABLE_PROXY_PORT:-8377}" \
+      timeout 90 "$OPENCODE_BIN" -p "smoke test: reply with the single word ok" -q -f text 2>&1)"; then
+    log "  e2e smoke OK: $(echo "$e2e_out" | head -1 | cut -c1-60)"
+  else
+    die "smoke test" "end-to-end fable run failed: $(echo "$e2e_out" | tail -3)"
+  fi
+
   # secret-leak check: raw key must not appear anywhere under FABLE_HOME
   if grep -rqF "$ANTHROPIC_API_KEY" "$FABLE_HOME" 2>/dev/null; then
     die "smoke test" "RAW API KEY FOUND in $FABLE_HOME — redaction failure, do not proceed"
@@ -581,7 +594,13 @@ phase7_smoke() {
   # hash chain integrity
   "$PYTHON" "$REPO_ROOT/bin/fable-audit" verify >/dev/null \
     || die "smoke test" "audit hash-chain verification failed"
-  log "  proxied request OK, $((after - before)) audit events captured, no key leakage, chain verified"
+  # API error scan: any 4xx/5xx captured during smoke is a config/SDK bug
+  if "$PYTHON" "$REPO_ROOT/bin/fable-audit" errors --quiet 2>/dev/null; then
+    :
+  else
+    log "  WARNING: API errors found in audit log — run ./bin/fable-audit errors"
+  fi
+  log "  proxied request OK, $((after - before)) audit events captured, e2e verified, no key leakage, chain verified"
   phase_result "✓" "smoke test"
 }
 

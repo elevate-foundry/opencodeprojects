@@ -618,6 +618,7 @@ main() {
     log "Done (check mode). Run ./bootstrap.sh to provision for real."
   else
     log "Launching Fable..."
+    export ANTHROPIC_BASE_URL="http://127.0.0.1:${FABLE_PROXY_PORT:-8377}"
     exec "$OPENCODE_BIN"
   fi
 }

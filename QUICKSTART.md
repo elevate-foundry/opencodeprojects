@@ -1,62 +1,35 @@
-# Quickstart — Linux
+# Quickstart
 
-Get Fable (opencode + Anthropic + SOC 2 audit logging) running in under 2 minutes.
-
-## Prerequisites
-
-- **Linux** x86_64 or arm64 (Ubuntu, Debian, Fedora, Arch, Termux — anything with bash)
-- **Python 3.8+** (`python3 --version`)
-- **curl**, **unzip** (pre-installed on most distros)
-- **git** (optional but recommended)
-- An **Anthropic API key** (`sk-ant-...`) — get one at https://console.anthropic.com/settings/keys
-
-## 1. Clone and enter the repo
+One command. Paste it, replace the key, hit enter.
 
 ```bash
-git clone https://github.com/YOUR_ORG/opencodeprojects.git
-cd opencodeprojects
+git clone https://github.com/salus-ryan/opencodeprojects.git && cd opencodeprojects && echo 'ANTHROPIC_API_KEY=sk-ant-PASTE_YOUR_KEY_HERE' > .env && ./bootstrap.sh
 ```
 
-## 2. Add your API key
+> Get an API key at https://console.anthropic.com/settings/keys if you don't have one.
+
+That's it. Bootstrap handles everything — Python, opencode, config, audit proxy, smoke test. When it finishes:
 
 ```bash
-cp .env.example .env
-nano .env   # paste your key on the ANTHROPIC_API_KEY= line
+./bin/fable          # launch Fable (assembles dynamic prompt, starts opencode)
 ```
 
-The file should look like:
+---
+
+## What bootstrap does (10 phases)
 
 ```
-ANTHROPIC_API_KEY=sk-ant-api03-xxxxxxxxxxxx
-```
-
-> `.env` is gitignored. Bootstrap will `chmod 600` it automatically.
-
-## 3. Run bootstrap
-
-```bash
-./bootstrap.sh
-```
-
-That's it. Bootstrap runs 7 phases:
-
-```
-✓ platform detection (linux-x64, laptop)
-✓ opencode present (1.14.28)            # or downloads + SHA256-verifies it
+✓ cleanup                                # kills stale proxy processes
+✓ platform detection (linux-x64, laptop) # also supports macOS, arm64, Termux
+✓ python + venv                          # auto-installs python3 if missing
+✓ opencode present (1.14.28)             # or downloads + SHA256-verifies it
 ✓ credentials verified                   # shape + live API check, key never printed
-✓ warmup (claude-sonnet-4-5)            # real completion, reports latency
+✓ warmup (claude-sonnet-4-5)             # real completion, reports latency + cache stats
+✓ dynamic prompt assembled               # layers core + manifest + memory + preflight
 ✓ opencode wired to anthropic via audit proxy
 ✓ audit proxy started                    # 127.0.0.1:8377, all traffic logged
 ✓ smoke test                             # end-to-end, hash chain verified
 ```
-
-## 4. Use opencode
-
-```bash
-opencode
-```
-
-Every request and response now flows through the local audit proxy and is logged to `~/.fable/audit/`.
 
 ## Common flags
 
@@ -68,12 +41,14 @@ Every request and response now flows through the local audit proxy and is logged
 | `--prime-cache` | Seed the Anthropic prompt cache with the system prompt + repo manifest |
 | `--verbose` | Extra detail per phase |
 
-## Verify the audit log
+## Audit log
 
 ```bash
 ./bin/fable-audit tail          # last 20 events
 ./bin/fable-audit verify        # recompute SHA-256 hash chain
-./bin/fable-audit tail -n 5     # last 5 events
+./bin/fable-audit tokens        # token usage + cost (compare with Anthropic console)
+./bin/fable-audit tokens --date 2026-06-12  # filter by date
+./bin/fable-audit export --out dump.jsonl   # full export
 ```
 
 ## Re-running is safe

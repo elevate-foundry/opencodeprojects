@@ -1,12 +1,14 @@
 # Quickstart
 
-One command. Paste it, replace the key, hit enter.
+Export your key, then one command:
 
 ```bash
-git clone https://github.com/salus-ryan/opencodeprojects.git && cd opencodeprojects && echo 'ANTHROPIC_API_KEY=sk-ant-PASTE_YOUR_KEY_HERE' > .env && ./bootstrap.sh
+export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-> Get an API key at https://console.anthropic.com/settings/keys if you don't have one.
+```bash
+git clone https://github.com/salus-ryan/opencodeprojects.git && cd opencodeprojects && echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" > .env && ./bootstrap.sh
+```
 
 That's it. Bootstrap handles everything — Python, opencode, config, audit proxy, smoke test. When it finishes:
 

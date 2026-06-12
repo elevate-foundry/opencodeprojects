@@ -1,4 +1,4 @@
-<!-- AUTO-ASSEMBLED by scripts/assemble-prompt.sh at 2026-06-12T17:16:20Z -->
+<!-- AUTO-ASSEMBLED by scripts/assemble-prompt.sh at 2026-06-12T17:21:07Z -->
 
 # STATIC CORE
 
@@ -90,7 +90,7 @@ No learned patterns yet. As you work, append useful discoveries to ~/.fable/memo
 
 ```
 SESSION PREFLIGHT
-timestamp_utc=2026-06-12T17:16:20Z
+timestamp_utc=2026-06-12T17:21:07Z
 user=owner
 hostname=bart
 home=/home/owner
@@ -98,10 +98,10 @@ pwd=/home/owner/opencodeprojects
 form_factor=laptop
 git_root=/home/owner/opencodeprojects
 git_branch=main
-git_commit=ed2a5d7ad7c22a8b6e34d815472640fb61674dda
+git_commit=427a893c49bab4cf59489877311db8fcf6aac0b5
 git_dirty=true
 git_status_porcelain<<EOF
- M prompts/system.md
+ M bootstrap.sh
 EOF
 top_level_files<<EOF
 .

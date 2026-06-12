@@ -434,7 +434,34 @@ phase5b_wiring() {
     log "  [check] would merge opencode.json (provider=anthropic via proxy :$FABLE_PROXY_PORT)"
     phase_result "−" "wiring (check mode)"; return
   fi
-  "$PYTHON" - "$REPO_ROOT/opencode.json" "$FABLE_PROXY_PORT" "${FABLE_MODEL:-claude-sonnet-4-5}" <<'PY'
+  # resolve model: explicit FABLE_MODEL > dynamic lookup by FABLE_MODEL_TIER > default
+  local resolved_model
+  if [ -n "${FABLE_MODEL:-}" ]; then
+    resolved_model="$FABLE_MODEL"
+    log "  model override: $resolved_model"
+  else
+    local tier="${FABLE_MODEL_TIER:-sonnet}"
+    log "  querying Anthropic for newest $tier model..."
+    resolved_model="$("$PYTHON" - "$tier" <<'PYMODEL'
+import json, sys, urllib.request
+tier = sys.argv[1]
+req = urllib.request.Request(
+    "https://api.anthropic.com/v1/models?limit=100",
+    headers={"x-api-key": __import__("os").environ["ANTHROPIC_API_KEY"],
+             "anthropic-version": "2023-06-01"})
+data = json.loads(urllib.request.urlopen(req, timeout=10).read())
+candidates = [m for m in data.get("data", []) if tier in m["id"]]
+candidates.sort(key=lambda m: m.get("created_at", ""), reverse=True)
+if candidates:
+    print(candidates[0]["id"])
+else:
+    print(f"claude-{tier}-4-5")
+PYMODEL
+    )" || resolved_model="claude-sonnet-4-5"
+    log "  resolved model: $resolved_model"
+  fi
+
+  "$PYTHON" - "$REPO_ROOT/opencode.json" "$FABLE_PROXY_PORT" "$resolved_model" <<'PY'
 import json, os, sys
 path, port, model = sys.argv[1], sys.argv[2], sys.argv[3]
 cfg = {}
@@ -442,12 +469,14 @@ if os.path.exists(path):
     with open(path) as f:
         cfg = json.load(f)
 cfg["$schema"] = "https://opencode.ai/config.json"
-cfg["model"] = f"anthropic/{model}"
 
 # provider: anthropic via audit proxy
 prov = cfg.setdefault("provider", {}).setdefault("anthropic", {}).setdefault("options", {})
 prov["baseURL"] = f"http://127.0.0.1:{port}"
 prov["apiKey"] = "{env:ANTHROPIC_API_KEY}"
+
+# fable agent owns the model — no top-level "model" key needed
+cfg.pop("model", None)
 
 # agent: fable — primary agent with system prompt and all tools
 cfg["agent"] = {

@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""fable-audit: tail / verify / export / rotate the Fable audit log.
+
+Usage:
+  fable-audit tail [-n N]        show the last N events (default 20)
+  fable-audit verify             recompute the SHA-256 hash chain; exit 1 on tamper
+  fable-audit export [--out F]   dump all events (chronological) as JSONL
+  fable-audit rotate             gzip old daily logs, enforce retention
+"""
+import argparse
+import gzip
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+
+AUDIT_DIR = Path(os.environ.get("FABLE_AUDIT_DIR", str(Path.home() / ".fable" / "audit")))
+GENESIS = "0" * 64
+
+
+def iter_events():
+    files = sorted(AUDIT_DIR.glob("audit-*.jsonl.gz")) + sorted(AUDIT_DIR.glob("audit-*.jsonl"))
+    files.sort(key=lambda p: p.name[6:16])
+    for path in files:
+        opener = gzip.open if path.suffix == ".gz" else open
+        with opener(path, "rt", encoding="utf-8") as f:
+            for lineno, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    yield path, lineno, json.loads(line)
+                except json.JSONDecodeError:
+                    yield path, lineno, None
+
+
+def cmd_tail(args):
+    events = [e for _, _, e in iter_events() if e]
+    for e in events[-args.n:]:
+        usage = e.get("usage") or {}
+        extra = ""
+        if e["event_type"] in ("api_request", "api_response"):
+            http = e.get("http", {})
+            extra = f" {http.get('method', '')} {http.get('path', '')} {http.get('status', '')}"
+            if usage:
+                extra += f" in={usage.get('input_tokens')} out={usage.get('output_tokens')}"
+        elif e["event_type"] in ("tool_call", "tool_result"):
+            extra = f" {e.get('tool', {}).get('name') or e.get('tool', {}).get('tool_use_id', '')}"
+        print(f"{e['timestamp']}  {e['event_type']:<14}{extra}")
+
+
+def cmd_verify(_args):
+    prev = GENESIS
+    count = 0
+    for path, lineno, e in iter_events():
+        if e is None:
+            print(f"TAMPER: unparseable line {path}:{lineno}", file=sys.stderr)
+            sys.exit(1)
+        claimed = e.pop("hash", None)
+        if e.get("prev_hash") != prev:
+            print(f"TAMPER: chain break at {path}:{lineno} "
+                  f"(expected prev_hash {prev[:12]}…, got {str(e.get('prev_hash'))[:12]}…)", file=sys.stderr)
+            sys.exit(1)
+        payload = json.dumps(e, sort_keys=True, ensure_ascii=False)
+        computed = hashlib.sha256((prev + payload).encode()).hexdigest()
+        if computed != claimed:
+            print(f"TAMPER: hash mismatch at {path}:{lineno}", file=sys.stderr)
+            sys.exit(1)
+        prev = computed
+        count += 1
+    print(f"OK: {count} events verified, chain intact")
+
+
+def cmd_export(args):
+    out = open(args.out, "w", encoding="utf-8") if args.out else sys.stdout
+    for _, _, e in iter_events():
+        if e:
+            out.write(json.dumps(e, sort_keys=True, ensure_ascii=False) + "\n")
+    if args.out:
+        out.close()
+        print(f"exported to {args.out}", file=sys.stderr)
+
+
+def cmd_rotate(_args):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "proxy"))
+    from audit_proxy import AuditLog  # noqa: PLC0415
+    AuditLog(AUDIT_DIR).rotate()
+    print("rotation complete")
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="fable-audit", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    p_tail = sub.add_parser("tail")
+    p_tail.add_argument("-n", type=int, default=20)
+    sub.add_parser("verify")
+    p_exp = sub.add_parser("export")
+    p_exp.add_argument("--out")
+    sub.add_parser("rotate")
+    args = parser.parse_args()
+    {"tail": cmd_tail, "verify": cmd_verify, "export": cmd_export, "rotate": cmd_rotate}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    main()

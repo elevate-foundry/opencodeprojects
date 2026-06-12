@@ -1,0 +1,5 @@
+.env
+opencode.json
+*.pyc
+__pycache__/
+nohup.out

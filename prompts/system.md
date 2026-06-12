@@ -1,4 +1,4 @@
-<!-- AUTO-ASSEMBLED by scripts/assemble-prompt.sh at 2026-06-12T17:34:00Z -->
+<!-- AUTO-ASSEMBLED by scripts/assemble-prompt.sh at 2026-06-12T21:21:03Z -->
 
 # STATIC CORE
 
@@ -90,46 +90,63 @@ No learned patterns yet. As you work, append useful discoveries to ~/.fable/memo
 
 ```
 SESSION PREFLIGHT
-timestamp_utc=2026-06-12T17:34:00Z
-user=owner
-hostname=bart
-home=/home/owner
-pwd=/home/owner/opencodeprojects
-form_factor=laptop
-git_root=/home/owner/opencodeprojects
+timestamp_utc=2026-06-12T21:21:03Z
+user=u0_a482
+hostname=localhost
+home=/data/data/com.termux/files/home
+pwd=/data/data/com.termux/files/home/opencodeprojects
+form_factor=mobile
+git_root=/data/data/com.termux/files/home/opencodeprojects
 git_branch=main
-git_commit=61c731249cca860e1e18dfb076281105c12328eb
+git_commit=449c486c59b5f4630790d15475b5f629ad0e375a
 git_dirty=false
 git_status_porcelain<<EOF
 EOF
 top_level_files<<EOF
 .
-bin
-bin/fable
-bin/fable-audit
-bin/__pycache__
-bootstrap.sh
-build.md
 .env
 .env.example
 .git
 .gitignore
-opencode.json
 PRD.md
+QUICKSTART.md
+README.md
+bin
+bin/fable
+bin/fable-audit
+bootstrap.sh
+build.md
+opencode-src
+opencode-src/.git
+opencode-src/.github
+opencode-src/.gitignore
+opencode-src/.goreleaser.yml
+opencode-src/.opencode.json
+opencode-src/LICENSE
+opencode-src/README.md
+opencode-src/cmd
+opencode-src/go.mod
+opencode-src/go.sum
+opencode-src/install
+opencode-src/internal
+opencode-src/main.go
+opencode-src/opencode-schema.json
+opencode-src/scripts
+opencode-src/sqlc.yaml
 prompts
 prompts/core.md
 prompts/system.md
 proxy
 proxy/audit_proxy.py
-proxy/__pycache__
-QUICKSTART.md
-README.md
 scripts
 scripts/assemble-prompt.sh
+scripts/key-prompt-server.py
 scripts/preflight.sh
 scripts/repo-manifest.sh
+scripts/termux-install.sh
 EOF
 detected_manifests<<EOF
+./opencode-src/go.mod
 EOF
 ```
 

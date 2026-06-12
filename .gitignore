@@ -5,3 +5,4 @@ prompts/system.md
 __pycache__/
 nohup.out
 opencode-src/
+.opencode/

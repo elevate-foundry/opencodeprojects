@@ -1,0 +1,9 @@
+name: swarm
+version: 0.1.0
+description: Multi-agent synthesis - parallel role-agents (codex/critic/dreamer) fused by a Synth agent. Hybrid of sal + possible-minds + v2_agi patterns.
+entrypoint: swarm.py
+usage: "swarm.py [--verbose] [--roles codex,critic,dreamer] \"<prompt>\""
+triggers: ["swarm this", "get multiple perspectives", "synthesize answers", "braid"]
+requirements: {bins: [python3], files: [~/opencodeprojects/.env], services: [audit-proxy:8377]}
+permissions: [network, llm]
+interactive: false

@@ -1,5 +1,6 @@
 .env
 opencode.json
+prompts/system.md
 *.pyc
 __pycache__/
 nohup.out

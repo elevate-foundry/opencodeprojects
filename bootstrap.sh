@@ -56,7 +56,7 @@ need_cmd() {
 
 # ---------- phase 0: cleanup ----------
 phase0_cleanup() {
-  log "== Phase 1/9: cleanup stale processes/ports"
+  log "== Phase 1/10: cleanup stale processes/ports"
   FABLE_PROXY_PORT="${FABLE_PROXY_PORT:-8377}"
   local pidfile="$FABLE_HOME/proxy.pid"
   local killed=0
@@ -115,7 +115,7 @@ phase0_cleanup() {
 
 # ---------- phase 1: platform detection ----------
 phase1_platform() {
-  log "== Phase 2/9: platform detection"
+  log "== Phase 2/10: platform detection"
   need_cmd uname; need_cmd curl
 
   local os arch
@@ -143,7 +143,7 @@ phase1_platform() {
 
 # ---------- phase 1b: python + venv ----------
 phase1b_python() {
-  log "== Phase 3/9: python + venv"
+  log "== Phase 3/10: python + venv"
 
   # --- auto-install python3 if missing ---
   if ! command -v python3 >/dev/null 2>&1; then
@@ -249,7 +249,7 @@ phase1b_python() {
 
 # ---------- phase 2: opencode install ----------
 phase2_opencode() {
-  log "== Phase 4/9: opencode install/verify"
+  log "== Phase 4/10: opencode install/verify"
   OPENCODE_BIN=""
   if [ "$FORCE_DOWNLOAD" -eq 0 ]; then
     if command -v opencode >/dev/null 2>&1 && opencode --version >/dev/null 2>&1; then
@@ -313,7 +313,7 @@ phase2_opencode() {
 
 # ---------- phase 3: credential verification ----------
 phase3_credentials() {
-  log "== Phase 5/9: ANTHROPIC_API_KEY verification"
+  log "== Phase 5/10: ANTHROPIC_API_KEY verification"
   local env_file="$REPO_ROOT/.env"
   [ -f "$env_file" ] || die "credentials" ".env not found at $env_file (cp .env.example .env and add ANTHROPIC_API_KEY)"
 
@@ -363,7 +363,7 @@ phase3_credentials() {
 
 # ---------- phase 4: warmup ----------
 phase4_warmup() {
-  log "== Phase 6/9: Anthropic warmup"
+  log "== Phase 6/10: Anthropic warmup"
   if [ "$NO_WARMUP" -eq 1 ]; then
     log "  skipped (--no-warmup)"; phase_result "−" "warmup skipped"; return
   fi
@@ -411,9 +411,24 @@ PY
   phase_result "✓" "warmup ($FABLE_MODEL)"
 }
 
-# ---------- phase 5: opencode <-> anthropic wiring ----------
-phase5_wiring() {
-  log "== Phase 7/9: opencode config wiring"
+# ---------- phase 5: assemble dynamic prompt ----------
+phase5_assemble_prompt() {
+  log "== Phase 7/10: assemble dynamic system prompt"
+  if [ "$CHECK_ONLY" -eq 1 ]; then
+    log "  [check] would assemble prompts/system.md from core + manifest + memory + preflight + history"
+    phase_result "−" "prompt assembly (check mode)"; return
+  fi
+  chmod +x "$REPO_ROOT/scripts/assemble-prompt.sh"
+  local out
+  out="$(bash "$REPO_ROOT/scripts/assemble-prompt.sh" 2>&1)" \
+    || die "prompt assembly" "scripts/assemble-prompt.sh failed: $out"
+  log "  $out"
+  phase_result "✓" "dynamic prompt assembled"
+}
+
+# ---------- phase 5b: opencode <-> anthropic wiring ----------
+phase5b_wiring() {
+  log "== Phase 8/10: opencode config wiring"
   FABLE_PROXY_PORT="${FABLE_PROXY_PORT:-8377}"
   if [ "$CHECK_ONLY" -eq 1 ]; then
     log "  [check] would merge opencode.json (provider=anthropic via proxy :$FABLE_PROXY_PORT)"
@@ -485,7 +500,7 @@ PY
 
 # ---------- phase 6: audit proxy ----------
 phase6_proxy() {
-  log "== Phase 8/9: audit proxy"
+  log "== Phase 9/10: audit proxy"
   FABLE_PROXY_PORT="${FABLE_PROXY_PORT:-8377}"
   FABLE_AUDIT_DIR="${FABLE_AUDIT_DIR:-$FABLE_HOME/audit}"
   if [ "$CHECK_ONLY" -eq 1 ]; then
@@ -517,7 +532,7 @@ phase6_proxy() {
 
 # ---------- phase 7: smoke test ----------
 phase7_smoke() {
-  log "== Phase 9/9: smoke test through proxy"
+  log "== Phase 10/10: smoke test through proxy"
   if [ "$CHECK_ONLY" -eq 1 ]; then
     log "  [check] would send 1 message through proxy and assert audit capture"
     phase_result "−" "smoke (check mode)"; return
@@ -567,7 +582,8 @@ main() {
   phase2_opencode
   phase3_credentials
   phase4_warmup
-  phase5_wiring
+  phase5_assemble_prompt
+  phase5b_wiring
   phase6_proxy
   phase7_smoke
   write_state

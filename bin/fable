@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Launch Fable: assemble dynamic prompt, then start opencode.
+# Usage: fable [opencode args...]
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FABLE_HOME="${FABLE_HOME:-$HOME/.fable}"
+
+# load .env if present
+if [ -f "$REPO_ROOT/.env" ]; then
+  set -a; . "$REPO_ROOT/.env"; set +a
+fi
+
+# assemble prompt fresh before every session
+if [ -x "$REPO_ROOT/scripts/assemble-prompt.sh" ]; then
+  bash "$REPO_ROOT/scripts/assemble-prompt.sh" >/dev/null 2>&1 || true
+fi
+
+# ensure proxy is running
+FABLE_PROXY_PORT="${FABLE_PROXY_PORT:-8377}"
+if ! curl -fsS "http://127.0.0.1:$FABLE_PROXY_PORT/healthz" >/dev/null 2>&1; then
+  echo "audit proxy not running — start it with ./bootstrap.sh or:"
+  echo "  nohup python3 proxy/audit_proxy.py --port $FABLE_PROXY_PORT &"
+  exit 1
+fi
+
+# run opencode (passes through all args)
+exec opencode "$@"

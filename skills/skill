@@ -1,12 +1,16 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # skill — manage pocket-agent skills
-# Usage: skill list | skill info <name> | skill install <name> [--registry <git-url-or-path>]
+# Usage: skill list | skill info <name> | skill install <name> [--registry <git-url-or-path>] | skill run <name> [args...]
 set -euo pipefail
 SKILLS_DIR="${FABLE_SKILLS:-$HOME/.fable/skills}"
 REGISTRY="${FABLE_REGISTRY:-https://github.com/salus-ryan/opencodeprojects.git}"
 REG_CACHE="$HOME/.fable/.registry-cache"
+RUN_LOG="$HOME/.fable/skill-runs.jsonl"
 
 yamlval() { grep "^$2:" "$1" | head -1 | cut -d: -f2- | sed 's/^ *//;s/ *$//'; }
+
+# extract an indented block under a top-level key (e.g. budget:, audit:)
+yamlblock() { awk -v key="$2:" '$0==key{f=1;next} f&&/^[^ ]/{f=0} f' "$1"; }
 
 case "${1:-list}" in
   list)
@@ -53,6 +57,44 @@ case "${1:-list}" in
     chmod +x "$SKILLS_DIR/$name/$(yamlval "$m" entrypoint)" 2>/dev/null || true
     echo "  installed -> $SKILLS_DIR/$name/"
     ;;
+  run)
+    name="${2:?usage: skill run <name> [args...]}"; shift 2
+    dir="$SKILLS_DIR/$name"; m="$dir/skill.yaml"
+    [ -f "$m" ] || { echo "no such skill: $name"; exit 1; }
+    entry="$(yamlval "$m" entrypoint)"
+    [ -x "$dir/$entry" ] || { echo "entrypoint not executable: $dir/$entry"; exit 1; }
+    # 1. requirements: bins must exist
+    reqs=$(yamlval "$m" requirements)
+    bins=$(echo "$reqs" | grep -o 'bins: \[[^]]*\]' | sed 's/bins: \[//;s/\]//;s/,/ /g' || true)
+    missing=""
+    for b in $bins; do command -v "$b" >/dev/null || missing="$missing $b"; done
+    [ -n "$missing" ] && { echo "[governor] MISSING bins:$missing"; exit 1; }
+    # 2. budget block: lines like "key: value  # ENV_NAME" -> export ENV_NAME=value
+    while IFS= read -r line; do
+      env=$(echo "$line" | grep -o '#[[:space:]]*[A-Z][A-Z0-9_]*' | sed 's/#[[:space:]]*//' | head -1 || true)
+      val=$(echo "$line" | sed 's/#.*//' | cut -d: -f2- | sed 's/^ *//;s/ *$//')
+      if [ -n "$env" ] && [ -n "$val" ]; then
+        export "$env"="$val"
+        echo "[governor] $env=$val" >&2
+      fi
+    done < <(yamlblock "$m" budget | grep ':' || true)
+    # 3. confirmation gate
+    confirms=$(yamlblock "$m" audit | awk '/require_human_confirmation_for:/{f=1;next} f&&/^[ ]*-/{print $2} f&&!/^[ ]*-/{f=0}' || true)
+    if [ -n "$confirms" ]; then
+      echo "[governor] '$name' requires confirmation for:$(echo $confirms | tr '\n' ' ')" >&2
+      printf "[governor] proceed? [y/N] " >&2; read -r ans
+      [ "$ans" = "y" ] || { echo "[governor] denied"; exit 1; }
+    fi
+    # 4. audited execution
+    start=$(date +%s); ts=$(date -u +%Y-%m-%dT%H:%M:%SZ); rc=0
+    "$dir/$entry" "$@" || rc=$?
+    dur=$(( $(date +%s) - start ))
+    printf '{"ts":"%s","skill":"%s","version":"%s","args":%s,"exit":%d,"duration_s":%d}\n' \
+      "$ts" "$name" "$(yamlval "$m" version)" \
+      "$(printf '%s' "$*" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
+      "$rc" "$dur" >> "$RUN_LOG"
+    exit $rc
+    ;;
   *)
-    echo "usage: skill list | skill info <name> | skill install <name> [--registry <url-or-path>]"; exit 2 ;;
+    echo "usage: skill list | skill info <name> | skill install <name> [--registry <url-or-path>] | skill run <name> [args...]"; exit 2 ;;
 esac

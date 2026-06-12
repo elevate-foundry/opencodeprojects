@@ -158,8 +158,8 @@ def cmd_tokens(args):
         print("no usage data found" + (f" for {date_filter}" if date_filter else ""))
         return
 
-    # column widths
-    hdr = f"{'model':<36} {'reqs':>5} {'input':>10} {'output':>10} {'cache_read':>12} {'cache_write':>12} {'est_cost':>10}"
+    hdr = (f"{'model':<36} {'reqs':>5} {'input':>10} {'output':>10} "
+           f"{'cache_read':>12} {'cache_write':>12} {'TOTAL':>12} {'est_cost':>10}")
     print(hdr)
     print("-" * len(hdr))
 
@@ -176,9 +176,12 @@ def cmd_tokens(args):
                     + row["cache_creation_input_tokens"] * cw_p) / 1_000_000
         else:
             cost = 0.0
+        total = (row["input_tokens"] + row["output_tokens"]
+                 + row["cache_read_input_tokens"] + row["cache_creation_input_tokens"])
         cost_str = f"${cost:.4f}" if pricing else "n/a"
         print(f"{model:<36} {row['requests']:>5} {row['input_tokens']:>10,} {row['output_tokens']:>10,} "
-              f"{row['cache_read_input_tokens']:>12,} {row['cache_creation_input_tokens']:>12,} {cost_str:>10}")
+              f"{row['cache_read_input_tokens']:>12,} {row['cache_creation_input_tokens']:>12,} "
+              f"{total:>12,} {cost_str:>10}")
         grand["requests"] += row["requests"]
         grand["input_tokens"] += row["input_tokens"]
         grand["output_tokens"] += row["output_tokens"]
@@ -186,14 +189,18 @@ def cmd_tokens(args):
         grand["cache_creation_input_tokens"] += row["cache_creation_input_tokens"]
         grand["cost"] += cost
 
-    if len(by_model) > 1:
-        print("-" * len(hdr))
-        print(f"{'TOTAL':<36} {grand['requests']:>5} {grand['input_tokens']:>10,} {grand['output_tokens']:>10,} "
-              f"{grand['cache_read_input_tokens']:>12,} {grand['cache_creation_input_tokens']:>12,} ${grand['cost']:>9.4f}")
+    grand_total = (grand["input_tokens"] + grand["output_tokens"]
+                   + grand["cache_read_input_tokens"] + grand["cache_creation_input_tokens"])
+    print("-" * len(hdr))
+    print(f"{'TOTAL':<36} {grand['requests']:>5} {grand['input_tokens']:>10,} {grand['output_tokens']:>10,} "
+          f"{grand['cache_read_input_tokens']:>12,} {grand['cache_creation_input_tokens']:>12,} "
+          f"{grand_total:>12,} ${grand['cost']:>9.4f}")
 
     print(f"\n{events_with_usage} responses with usage, {events_without_usage} without")
+    print(f"\nReconciliation: TOTAL column should match Anthropic console token count.")
+    print(f"  Proxy total: {grand_total:,} tokens")
     if events_without_usage:
-        print("(responses without usage may be streaming calls before proxy upgrade — re-run after new sessions)")
+        print("  (some responses missing usage — re-run after new sessions with updated proxy)")
 
 
 def main():

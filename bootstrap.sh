@@ -367,7 +367,7 @@ phase4_warmup() {
   if [ "$NO_WARMUP" -eq 1 ]; then
     log "  skipped (--no-warmup)"; phase_result "−" "warmup skipped"; return
   fi
-  FABLE_MODEL="${FABLE_MODEL:-claude-sonnet-4-5}"
+  local warmup_model="${FABLE_MODEL:-claude-sonnet-4-5}"
   local body sys_block="" resp meta status ttfb total
   if [ "$PRIME_CACHE" -eq 1 ] && [ -f "$REPO_ROOT/prompts/system.md" ]; then
     sys_block="$("$PYTHON" - "$REPO_ROOT/prompts/system.md" <<'PY'
@@ -377,7 +377,7 @@ print(json.dumps([{"type": "text", "text": text, "cache_control": {"type": "ephe
 PY
 )"
   fi
-  body="$("$PYTHON" - "$FABLE_MODEL" "$sys_block" <<'PY'
+  body="$("$PYTHON" - "$warmup_model" "$sys_block" <<'PY'
 import json, sys
 model, sys_block = sys.argv[1], sys.argv[2]
 req = {"model": model, "max_tokens": 16,
@@ -398,7 +398,7 @@ PY
     local etype
     etype="$("$PYTHON" -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("error",{}).get("type","unknown"))' "$resp" 2>/dev/null || echo unknown)"
     rm -f "$resp" "$meta"
-    die "warmup" "HTTP $status ($etype) from /v1/messages for model $FABLE_MODEL"
+    die "warmup" "HTTP $status ($etype) from /v1/messages for model $warmup_model"
   fi
   "$PYTHON" - "$resp" "$ttfb" "$total" <<'PY'
 import json, sys
@@ -408,7 +408,7 @@ print(f"  model={d.get('model')} ttfb={float(sys.argv[2])*1000:.0f}ms total={flo
       f"cache_read={u.get('cache_read_input_tokens', 0)} cache_write={u.get('cache_creation_input_tokens', 0)}")
 PY
   rm -f "$resp" "$meta"
-  phase_result "✓" "warmup ($FABLE_MODEL)"
+  phase_result "✓" "warmup ($warmup_model)"
 }
 
 # ---------- phase 5: assemble dynamic prompt ----------

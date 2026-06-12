@@ -1,0 +1,9 @@
+name: xmpp-listener-start
+version: 0.1.0
+description: Idempotent starter for the xmpp-listen daemon.
+entrypoint: xmpp-listener-start.sh
+usage: "xmpp-listener-start.sh"
+triggers: ["start listener", "ensure messaging online"]
+requirements: {os: android-termux, bins: [pgrep, python3]}
+permissions: [network]
+interactive: false

@@ -1,0 +1,9 @@
+name: xmpp-send
+version: 0.1.0
+description: Send an XMPP message from the agent's own account.
+entrypoint: xmpp-send.py
+usage: "xmpp-send.py <to_jid> \"<message>\""
+triggers: ["message someone on xmpp", "send chat message"]
+requirements: {bins: [python3], pip: [slixmpp], files: [~/.fable/.xmpp_pw]}
+permissions: [network]
+interactive: false

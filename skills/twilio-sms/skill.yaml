@@ -1,0 +1,9 @@
+name: twilio-sms
+version: 0.1.0
+description: Send SMS via Twilio API (no user interaction needed).
+entrypoint: twilio-sms.sh
+usage: "twilio-sms.sh <to_number> \"<message>\""
+triggers: ["send sms via twilio", "text without dialer"]
+requirements: {bins: [python3], env_file: ~/.fable/twilio.env}
+permissions: [network]
+interactive: false

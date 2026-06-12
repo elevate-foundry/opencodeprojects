@@ -1,0 +1,9 @@
+name: xmpp-listen
+version: 0.1.0
+description: Daemon - receive XMPP messages, log, notify, auto-ack.
+entrypoint: xmpp-listen.py
+usage: "nohup xmpp-listen.py & (or xmpp-listener-start)"
+triggers: ["receive messages", "listen for chats"]
+requirements: {bins: [python3], pip: [slixmpp], files: [~/.fable/.xmpp_pw]}
+permissions: [network, notifications]
+interactive: false

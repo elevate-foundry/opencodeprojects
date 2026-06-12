@@ -1,0 +1,9 @@
+name: xmpp-register
+version: 0.1.0
+description: Register a new XMPP account via in-band registration (XEP-0077).
+entrypoint: xmpp-register.py
+usage: "xmpp-register.py <server> <username> <password>"
+triggers: ["create messaging account", "register xmpp"]
+requirements: {bins: [python3], pip: [slixmpp]}
+permissions: [network]
+interactive: false

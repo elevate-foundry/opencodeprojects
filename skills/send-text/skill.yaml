@@ -1,0 +1,9 @@
+name: send-text
+version: 0.1.0
+description: Send an SMS (direct via termux-api, or pre-filled messaging app).
+entrypoint: send-text.sh
+usage: "send-text.sh <number> \"<message>\""
+triggers: ["text someone", "send sms", "send a message to phone number"]
+requirements: {os: android-termux, bins: [am]}
+permissions: [sms]
+interactive: true

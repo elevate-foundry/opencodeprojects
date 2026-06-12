@@ -1,0 +1,9 @@
+name: tts-call
+version: 0.1.0
+description: Place a phone call and speak a message via TTS.
+entrypoint: tts-call.sh
+usage: "tts-call.sh <number> \"<message>\" [delay_seconds]"
+triggers: ["call someone", "phone call", "speak on phone"]
+requirements: {os: android-termux, bins: [termux-tts-speak, am]}
+permissions: [dialer, audio]
+interactive: true

@@ -1,0 +1,27 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# skill — manage pocket-agent skills (M1: list, info; M2: install)
+# Usage: skill list | skill info <name>
+set -euo pipefail
+SKILLS_DIR="${FABLE_SKILLS:-$HOME/.fable/skills}"
+
+cmd="${1:-list}"
+case "$cmd" in
+  list)
+    printf "%-22s %-10s %s\n" "NAME" "VERSION" "DESCRIPTION"
+    for m in "$SKILLS_DIR"/*/skill.yaml; do
+      [ -f "$m" ] || continue
+      name=$(grep '^name:' "$m" | head -1 | cut -d: -f2- | sed "s/^ *//;s/ *$//")
+      ver=$(grep '^version:' "$m" | head -1 | cut -d: -f2- | sed "s/^ *//;s/ *$//")
+      desc=$(grep '^description:' "$m" | head -1 | cut -d: -f2- | sed "s/^ *//;s/ *$//")
+      printf "%-22s %-10s %s\n" "$name" "$ver" "$desc"
+    done
+    ;;
+  info)
+    name="${2:?usage: skill info <name>}"
+    m="$SKILLS_DIR/$name/skill.yaml"
+    [ -f "$m" ] || { echo "no such skill: $name"; exit 1; }
+    cat "$m"
+    ;;
+  *)
+    echo "usage: skill list | skill info <name>"; exit 2 ;;
+esac

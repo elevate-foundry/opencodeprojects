@@ -1,19 +1,19 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# skill — manage pocket-agent skills (M1: list, info; M2: install)
-# Usage: skill list | skill info <name>
+# skill — manage pocket-agent skills
+# Usage: skill list | skill info <name> | skill install <name> [--registry <git-url-or-path>]
 set -euo pipefail
 SKILLS_DIR="${FABLE_SKILLS:-$HOME/.fable/skills}"
+REGISTRY="${FABLE_REGISTRY:-https://github.com/salus-ryan/opencodeprojects.git}"
+REG_CACHE="$HOME/.fable/.registry-cache"
 
-cmd="${1:-list}"
-case "$cmd" in
+yamlval() { grep "^$2:" "$1" | head -1 | cut -d: -f2- | sed 's/^ *//;s/ *$//'; }
+
+case "${1:-list}" in
   list)
     printf "%-22s %-10s %s\n" "NAME" "VERSION" "DESCRIPTION"
     for m in "$SKILLS_DIR"/*/skill.yaml; do
       [ -f "$m" ] || continue
-      name=$(grep '^name:' "$m" | head -1 | cut -d: -f2- | sed "s/^ *//;s/ *$//")
-      ver=$(grep '^version:' "$m" | head -1 | cut -d: -f2- | sed "s/^ *//;s/ *$//")
-      desc=$(grep '^description:' "$m" | head -1 | cut -d: -f2- | sed "s/^ *//;s/ *$//")
-      printf "%-22s %-10s %s\n" "$name" "$ver" "$desc"
+      printf "%-22s %-10s %s\n" "$(yamlval "$m" name)" "$(yamlval "$m" version)" "$(yamlval "$m" description)"
     done
     ;;
   info)
@@ -22,6 +22,37 @@ case "$cmd" in
     [ -f "$m" ] || { echo "no such skill: $name"; exit 1; }
     cat "$m"
     ;;
+  install)
+    name="${2:?usage: skill install <name>}"
+    [ "${3:-}" = "--registry" ] && REGISTRY="$4"
+    if [ -d "$REGISTRY" ]; then
+      src="$REGISTRY/skills/$name"
+    else
+      if [ -d "$REG_CACHE/.git" ]; then
+        git -C "$REG_CACHE" pull --quiet 2>/dev/null || true
+      else
+        git clone --quiet --depth 1 "$REGISTRY" "$REG_CACHE"
+      fi
+      src="$REG_CACHE/skills/$name"
+    fi
+    [ -d "$src" ] || { echo "skill '$name' not found in registry"; exit 1; }
+    m="$src/skill.yaml"
+    [ -f "$m" ] || { echo "skill '$name' has no manifest; refusing to install"; exit 1; }
+    echo "Installing: $(yamlval "$m" name) v$(yamlval "$m" version)"
+    echo "  $(yamlval "$m" description)"
+    echo "  permissions: $(yamlval "$m" permissions)"
+    echo "  requirements: $(yamlval "$m" requirements)"
+    # requirement check: bins
+    reqs=$(yamlval "$m" requirements)
+    bins=$(echo "$reqs" | grep -o 'bins: \[[^]]*\]' | sed 's/bins: \[//;s/\]//;s/,/ /g' || true)
+    missing=""
+    for b in $bins; do command -v "$b" >/dev/null || missing="$missing $b"; done
+    [ -n "$missing" ] && { echo "  MISSING bins:$missing — install them first"; exit 1; }
+    mkdir -p "$SKILLS_DIR/$name"
+    cp "$src"/* "$SKILLS_DIR/$name/"
+    chmod +x "$SKILLS_DIR/$name/$(yamlval "$m" entrypoint)" 2>/dev/null || true
+    echo "  installed -> $SKILLS_DIR/$name/"
+    ;;
   *)
-    echo "usage: skill list | skill info <name>"; exit 2 ;;
+    echo "usage: skill list | skill info <name> | skill install <name> [--registry <url-or-path>]"; exit 2 ;;
 esac

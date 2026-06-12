@@ -1,0 +1,9 @@
+name: boot-persist
+version: 0.1.0
+description: Start Fable services (audit proxy + AI chat bridge) at device boot.
+entrypoint: fable-boot.sh
+usage: "cp fable-boot.sh ~/.termux/boot/ (requires Termux:Boot app from F-Droid)"
+triggers: ["survive reboot", "always online", "start at boot"]
+requirements: {os: android-termux, apps: [Termux:Boot]}
+permissions: [wakelock]
+interactive: false

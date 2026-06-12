@@ -1,0 +1,9 @@
+name: xmpp-agent-bridge
+version: 0.1.0
+description: AI-powered XMPP daemon - inbound messages get real Claude replies with per-sender memory.
+entrypoint: xmpp-agent-bridge.py
+usage: "nohup xmpp-agent-bridge.py & (replaces xmpp-listen; do not run both)"
+triggers: ["talk to people for me", "answer my messages", "agent chat presence"]
+requirements: {bins: [python3], pip: [slixmpp], files: [~/.fable/.xmpp_pw, ~/opencodeprojects/.env], services: [audit-proxy:8377]}
+permissions: [network, notifications, llm]
+interactive: false

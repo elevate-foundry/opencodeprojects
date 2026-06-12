@@ -170,6 +170,32 @@ def extract_tool_events(session_id, request_json, response_json, sse_text):
                 current = None
 
 
+def _extract_sse_usage(sse_text):
+    """Extract and merge usage from SSE events (message_start + message_delta).
+
+    Anthropic streaming sends:
+      - message_start: {"type": "message_start", "message": {"usage": {"input_tokens": N, "cache_read_input_tokens": N, "cache_creation_input_tokens": N}}}
+      - message_delta: {"type": "message_delta", "usage": {"output_tokens": N}}
+    We merge both into one dict matching the non-streaming usage format.
+    """
+    usage = {}
+    for line in sse_text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        try:
+            ev = json.loads(line[5:].strip())
+        except (json.JSONDecodeError, ValueError):
+            continue
+        t = ev.get("type")
+        if t == "message_start":
+            msg_usage = ev.get("message", {}).get("usage", {})
+            usage.update(msg_usage)
+        elif t == "message_delta":
+            delta_usage = ev.get("usage", {})
+            usage.update(delta_usage)
+    return usage or None
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "FableAuditProxy/1.0"
@@ -269,13 +295,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         resp_raw = b"".join(chunks)
         resp_text, resp_json = parse_body_for_log(resp_raw)
         latency_ms = int((time.monotonic() - start) * 1000)
+
+        # --- extract usage (non-streaming: top-level; streaming: from SSE events) ---
         usage = (resp_json or {}).get("usage")
+        sse_text = resp_text if is_stream else None
+        if is_stream and sse_text:
+            usage = _extract_sse_usage(sse_text)
+
         AUDIT.write("api_response", session_id=session_id, model=model,
                     http={"method": self.command, "path": self.path, "status": resp.status},
                     headers=redact_headers(dict(resp.getheaders())),
                     usage=usage, latency_ms=latency_ms, stream=is_stream,
                     response=resp_text)
-        sse_text = resp_text if is_stream else None
         extract_tool_events(session_id, req_json, resp_json, sse_text)
 
 

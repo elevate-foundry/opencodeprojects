@@ -449,35 +449,29 @@ prov = cfg.setdefault("provider", {}).setdefault("anthropic", {}).setdefault("op
 prov["baseURL"] = f"http://127.0.0.1:{port}"
 prov["apiKey"] = "{env:ANTHROPIC_API_KEY}"
 
-# agent: fable — uses the system prompt, model, and all built-in tools
+# agent: fable — primary agent with system prompt and all tools
 cfg["agent"] = {
     "fable": {
         "description": "Fable: careful, repo-native coding agent with SOC 2 audit logging",
+        "mode": "primary",
         "model": f"anthropic/{model}",
-        "prompt": "prompts/system.md",
-        "tools": {
-            "bash": True,
-            "edit": True,
-            "write": True,
-            "read": True,
-            "grep": True,
-            "glob": True,
-            "apply_patch": True,
-            "webfetch": True,
-            "todowrite": True,
-            "question": True,
-            "skill": True,
+        "prompt": "{file:./prompts/system.md}",
+        "permission": {
+            "read": "allow",
+            "edit": "allow",
+            "grep": "allow",
+            "glob": "allow",
+            "webfetch": "allow",
+            "todowrite": "allow",
+            "question": "allow",
+            "skill": "allow",
+            "bash": "ask",
         },
     }
 }
 cfg["default_agent"] = "fable"
 
-# instructions (global, in addition to the agent prompt)
-instr = cfg.setdefault("instructions", [])
-if "prompts/system.md" not in instr:
-    instr.append("prompts/system.md")
-
-# permissions: allow all by default, bash requires approval for safety
+# global permissions (fallback for non-agent context)
 cfg["permission"] = {
     "read": "allow",
     "edit": "allow",
@@ -489,6 +483,9 @@ cfg["permission"] = {
     "skill": "allow",
     "bash": "ask",
 }
+
+# remove stale instructions key (prompt is in agent config now)
+cfg.pop("instructions", None)
 
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)

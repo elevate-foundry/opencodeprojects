@@ -238,6 +238,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_error(503, "audit log unwritable (FABLE_AUDIT_STRICT=1)")
             return
 
+        # Normalize: some SDKs omit /v1/ when baseURL is set
+        if self.path.startswith("/messages") or self.path.startswith("/complete"):
+            self.path = "/v1" + self.path
+
         session_id = self.headers.get("x-fable-session", str(uuid.uuid4()))
         length = int(self.headers.get("Content-Length") or 0)
         req_raw = self.rfile.read(length) if length else b""

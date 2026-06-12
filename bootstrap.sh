@@ -313,7 +313,18 @@ phase2_opencode() {
 phase3_credentials() {
   log "== Phase 5/10: ANTHROPIC_API_KEY verification"
   local env_file="$REPO_ROOT/.env"
-  [ -f "$env_file" ] || die "credentials" ".env not found at $env_file (cp .env.example .env and add ANTHROPIC_API_KEY)"
+
+  # If .env is missing, seed it from .env.example
+  if [ ! -f "$env_file" ]; then
+    if [ -f "$REPO_ROOT/.env.example" ]; then
+      cp "$REPO_ROOT/.env.example" "$env_file"
+      chmod 600 "$env_file"
+      log "  created .env from .env.example"
+    else
+      touch "$env_file"
+      chmod 600 "$env_file"
+    fi
+  fi
 
   # tighten perms
   local mode
@@ -341,6 +352,31 @@ phase3_credentials() {
   # load .env (only lines KEY=VALUE, no export needed)
   set -a; # shellcheck disable=SC1090
   . "$env_file"; set +a
+
+  # If key is still missing, wait for it via the proxy's /setup page
+  if [ -z "${ANTHROPIC_API_KEY:-}" ] || [ "${ANTHROPIC_API_KEY:-}" = "sk-ant-your-key-here" ]; then
+    if [ "$CHECK_ONLY" -eq 1 ]; then
+      log "  [check] ANTHROPIC_API_KEY not set; would wait for browser key entry via proxy /setup"
+      phase_result "−" "credentials (check mode, key missing)"; return
+    fi
+    FABLE_PROXY_PORT="${FABLE_PROXY_PORT:-8377}"
+    log "  ANTHROPIC_API_KEY not set — waiting for key via http://localhost:$FABLE_PROXY_PORT/setup"
+    log "  Open that URL in your browser and paste your Anthropic API key."
+    local attempts=0
+    local max_attempts=600  # 5 minutes at 0.5s intervals
+    while [ "$attempts" -lt "$max_attempts" ]; do
+      if curl -fsS "http://127.0.0.1:$FABLE_PROXY_PORT/healthz" 2>/dev/null \
+           | "$PYTHON" -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("key_configured") else 1)' 2>/dev/null; then
+        log "  key received via browser"
+        break
+      fi
+      attempts=$((attempts + 1))
+      sleep 0.5
+    done
+    [ "$attempts" -lt "$max_attempts" ] || die "credentials" "timed out waiting for API key via /setup. Set ANTHROPIC_API_KEY in .env manually."
+    # reload .env after proxy wrote it
+    set -a; . "$env_file"; set +a
+  fi
 
   [ -n "${ANTHROPIC_API_KEY:-}" ] || die "credentials" "ANTHROPIC_API_KEY missing or empty in .env"
   case "$ANTHROPIC_API_KEY" in
@@ -535,10 +571,16 @@ phase6_proxy() {
   chmod 700 "$FABLE_HOME" "$FABLE_AUDIT_DIR"
 
   local pidfile="$FABLE_HOME/proxy.pid"
+  local env_file="$REPO_ROOT/.env"
+  local proxy_args="--port $FABLE_PROXY_PORT --env-file $env_file"
+  # If key isn't set yet, tell the proxy to open /setup in the browser
+  if [ -z "${ANTHROPIC_API_KEY:-}" ] || [ "${ANTHROPIC_API_KEY:-}" = "sk-ant-your-key-here" ]; then
+    proxy_args="$proxy_args --open-setup"
+  fi
   FABLE_AUDIT_DIR="$FABLE_AUDIT_DIR" \
   FABLE_AUDIT_STRICT="${FABLE_AUDIT_STRICT:-0}" \
   FABLE_AUDIT_RETENTION_DAYS="${FABLE_AUDIT_RETENTION_DAYS:-365}" \
-  nohup "$PYTHON" "$REPO_ROOT/proxy/audit_proxy.py" --port "$FABLE_PROXY_PORT" \
+  nohup "$PYTHON" "$REPO_ROOT/proxy/audit_proxy.py" $proxy_args \
     >> "$FABLE_HOME/proxy.out" 2>&1 &
   echo $! > "$pidfile"
 
@@ -623,11 +665,11 @@ main() {
   phase1_platform
   phase1b_python
   phase2_opencode
-  phase3_credentials
+  phase6_proxy           # proxy starts early so /setup is available for key entry
+  phase3_credentials     # polls proxy /healthz for key_configured if needed
   phase4_warmup
   phase5_assemble_prompt
   phase5b_wiring
-  phase6_proxy
   phase7_smoke
   write_state
   print_summary

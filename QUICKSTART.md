@@ -61,12 +61,22 @@ Bootstrap is idempotent. If opencode is already installed and the proxy is alrea
 ./bootstrap.sh --no-warmup      # fast re-check
 ```
 
-## Termux (Android)
+## Termux (Android) — one command
 
-Same steps. Bootstrap detects `$TERMUX_VERSION` / `$PREFIX` and pulls the `linux-arm64` binary. Install `python` and `curl` first:
+Paste this single command in Termux. It installs deps, clones the repo, and opens a browser page on your phone to paste your API key:
 
 ```bash
-pkg install python curl unzip git
+curl -fsSL https://raw.githubusercontent.com/salus-ryan/opencodeprojects/main/scripts/termux-install.sh | bash
+```
+
+That's it. No need to manually create `.env` or type your API key into the terminal — a mobile-friendly web page pops up for you to paste it.
+
+If you prefer to set the key beforehand:
+
+```bash
+pkg install python curl git golang
+git clone https://github.com/salus-ryan/opencodeprojects.git && cd opencodeprojects
+echo "ANTHROPIC_API_KEY=sk-ant-..." > .env && ./bootstrap.sh
 ```
 
 ## Stop the proxy

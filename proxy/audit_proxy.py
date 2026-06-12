@@ -8,6 +8,7 @@ Stdlib only. Python >= 3.8.
 import argparse
 import gzip
 import hashlib
+import html as html_mod
 import http.client
 import http.server
 import json
@@ -15,11 +16,13 @@ import os
 import re
 import socket
 import socketserver
+import subprocess
 import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import unquote_plus
 
 UPSTREAM_HOST = "api.anthropic.com"
 SECRET_RE = re.compile(r"sk-ant-[A-Za-z0-9_\-]{8,}")
@@ -33,6 +36,148 @@ MAX_LOGGED_BODY = 10 * 1024 * 1024  # 10 MiB per body in the log
 AUDIT_DIR = Path(os.environ.get("FABLE_AUDIT_DIR", str(Path.home() / ".fable" / "audit")))
 STRICT = os.environ.get("FABLE_AUDIT_STRICT", "0") == "1"
 RETENTION_DAYS = int(os.environ.get("FABLE_AUDIT_RETENTION_DAYS", "365"))
+
+# --- Key setup state ---
+# ENV_FILE is set via --env-file flag; key_ready is an Event signalled once
+# a valid ANTHROPIC_API_KEY is available (either from env or via /setup).
+ENV_FILE = None  # set in main()
+KEY_RE = re.compile(r"^sk-ant-[A-Za-z0-9_\-]{20,}$")
+key_ready = threading.Event()
+
+SETUP_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fable &mdash; API Key Setup</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f172a; color: #e2e8f0;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100dvh; margin: 0; padding: 1rem;
+  }
+  .card {
+    background: #1e293b; border-radius: 1rem; padding: 2rem;
+    max-width: 420px; width: 100%; box-shadow: 0 4px 24px rgba(0,0,0,.4);
+  }
+  h1 { margin: 0 0 .25rem; font-size: 1.5rem; color: #f8fafc; }
+  .sub { color: #94a3b8; font-size: .875rem; margin-bottom: 1.5rem; }
+  label { display: block; font-size: .875rem; color: #cbd5e1; margin-bottom: .375rem; }
+  input[type="password"], input[type="text"] {
+    width: 100%; padding: .75rem 1rem; border-radius: .5rem;
+    border: 1px solid #334155; background: #0f172a; color: #f1f5f9;
+    font-size: 1rem; font-family: monospace; outline: none;
+    transition: border-color .15s;
+  }
+  input:focus { border-color: #6366f1; }
+  .toggle { font-size: .75rem; color: #6366f1; cursor: pointer; margin-top: .25rem; display: inline-block; }
+  .error { color: #f87171; font-size: .8125rem; min-height: 1.25rem; margin-top: .5rem; }
+  button {
+    margin-top: 1rem; width: 100%; padding: .75rem;
+    background: #6366f1; color: #fff; font-size: 1rem; font-weight: 600;
+    border: none; border-radius: .5rem; cursor: pointer;
+    transition: background .15s;
+  }
+  button:hover { background: #4f46e5; }
+  button:disabled { background: #334155; cursor: not-allowed; }
+  .info { margin-top: 1.25rem; font-size: .75rem; color: #64748b; line-height: 1.5; }
+  .info a { color: #818cf8; }
+  .success { text-align: center; }
+  .success h2 { color: #34d399; margin-bottom: .5rem; }
+</style>
+</head>
+<body>
+<div class="card" id="form-card">
+  <h1>Fable</h1>
+  <p class="sub">Paste your Anthropic API key to finish setup.</p>
+  <form id="keyform" method="POST" action="/setup" autocomplete="off">
+    <label for="key">API Key</label>
+    <input type="password" id="key" name="key" placeholder="sk-ant-..." autofocus required>
+    <span class="toggle" onclick="toggleVis()">show</span>
+    <div class="error" id="err"></div>
+    <button type="submit" id="btn">Save &amp; Continue</button>
+  </form>
+  <div class="info">
+    Your key stays on this device. It is written to <code>.env</code> (mode 0600, gitignored)
+    and never leaves your machine except to <code>api.anthropic.com</code>.<br>
+    Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>.
+  </div>
+</div>
+<div class="card success" id="success-card" style="display:none">
+  <h2>Key saved &#x2714;</h2>
+  <p>Fable is starting. You can close this tab.</p>
+</div>
+<script>
+function toggleVis() {
+  const inp = document.getElementById('key');
+  const tog = document.querySelector('.toggle');
+  if (inp.type === 'password') { inp.type = 'text'; tog.textContent = 'hide'; }
+  else { inp.type = 'password'; tog.textContent = 'show'; }
+}
+document.getElementById('keyform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const key = document.getElementById('key').value.trim();
+  const err = document.getElementById('err');
+  const btn = document.getElementById('btn');
+  if (!/^sk-ant-[A-Za-z0-9_\\-]{20,}$/.test(key)) {
+    err.textContent = 'Key must start with sk-ant- and be at least 28 characters.';
+    return;
+  }
+  btn.disabled = true; btn.textContent = 'Saving\u2026'; err.textContent = '';
+  try {
+    const resp = await fetch('/setup', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'key=' + encodeURIComponent(key),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      document.getElementById('form-card').style.display = 'none';
+      document.getElementById('success-card').style.display = 'block';
+    } else {
+      err.textContent = data.error || 'Unknown error';
+      btn.disabled = false; btn.textContent = 'Save & Continue';
+    }
+  } catch (ex) {
+    err.textContent = 'Network error: ' + ex.message;
+    btn.disabled = false; btn.textContent = 'Save & Continue';
+  }
+});
+</script>
+</body>
+</html>
+"""
+
+
+def _write_env_key(key):
+    """Write ANTHROPIC_API_KEY to the .env file (upsert)."""
+    env_path = ENV_FILE
+    if not env_path:
+        return
+    lines = []
+    replaced = False
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                if line.strip().startswith("ANTHROPIC_API_KEY="):
+                    lines.append(f"ANTHROPIC_API_KEY={key}\n")
+                    replaced = True
+                else:
+                    lines.append(line)
+    if not replaced:
+        lines.append(f"ANTHROPIC_API_KEY={key}\n")
+    with open(env_path, "w") as f:
+        f.writelines(lines)
+    os.chmod(env_path, 0o600)
+
+
+def _check_key_ready():
+    """Return True if ANTHROPIC_API_KEY is set and not a placeholder."""
+    k = os.environ.get("ANTHROPIC_API_KEY", "")
+    return bool(k) and k != "sk-ant-your-key-here" and KEY_RE.match(k)
 
 
 def redact(text):
@@ -213,19 +358,69 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except OSError:
             return False
 
+    def _send_json(self, status, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_html(self, status, html_text):
+        body = html_text.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         if self.path == "/healthz":
-            body = json.dumps({"ok": True, "audit_dir": str(AUDIT.dir)}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_json(200, {
+                "ok": True,
+                "audit_dir": str(AUDIT.dir),
+                "key_configured": key_ready.is_set(),
+            })
+            return
+        if self.path == "/setup":
+            if key_ready.is_set():
+                self._send_html(200, '<html><body style="background:#0f172a;color:#34d399;'
+                    'display:flex;align-items:center;justify-content:center;'
+                    'min-height:100vh;font-family:sans-serif">'
+                    '<h1>Fable is already configured &#x2714;</h1></body></html>')
+            else:
+                self._send_html(200, SETUP_HTML)
             return
         self._proxy()
 
     def do_POST(self):
+        if self.path == "/setup":
+            self._handle_setup_post()
+            return
         self._proxy()
+
+    def _handle_setup_post(self):
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length).decode()
+        key = ""
+        for part in raw.split("&"):
+            if part.startswith("key="):
+                key = unquote_plus(part[4:]).strip()
+        if not KEY_RE.match(key):
+            self._send_json(400, {"ok": False,
+                "error": "Invalid key format. Must start with sk-ant- and be 28+ chars."})
+            return
+        try:
+            _write_env_key(key)
+        except OSError as exc:
+            self._send_json(500, {"ok": False,
+                "error": f"Failed to write .env: {html_mod.escape(str(exc))}"})
+            return
+        # Set in current process so the proxy can immediately forward requests
+        os.environ["ANTHROPIC_API_KEY"] = key
+        key_ready.set()
+        AUDIT.write("key_setup", method="browser", env_file=str(ENV_FILE))
+        self._send_json(200, {"ok": True})
 
     def do_PUT(self):
         self._proxy()
@@ -329,17 +524,39 @@ def rotation_loop():
 
 
 def main():
+    global ENV_FILE
     parser = argparse.ArgumentParser(description="Fable audit proxy")
     parser.add_argument("--port", type=int, default=int(os.environ.get("FABLE_PROXY_PORT", "8377")))
     parser.add_argument("--bind", default="127.0.0.1")
+    parser.add_argument("--env-file", default=None,
+                        help="Path to .env file for key setup (enables /setup endpoint)")
+    parser.add_argument("--open-setup", action="store_true",
+                        help="Auto-open /setup in browser if no API key is configured")
     args = parser.parse_args()
+
+    ENV_FILE = args.env_file
+
+    # Check if key is already available
+    if _check_key_ready():
+        key_ready.set()
 
     AUDIT.write("bootstrap_phase", phase="proxy_start",
                 config={"port": args.port, "strict": STRICT,
-                        "retention_days": RETENTION_DAYS, "audit_dir": str(AUDIT.dir)})
+                        "retention_days": RETENTION_DAYS, "audit_dir": str(AUDIT.dir),
+                        "key_configured": key_ready.is_set()})
     threading.Thread(target=rotation_loop, daemon=True).start()
     server = ThreadingHTTPServer((args.bind, args.port), Handler)
     print(f"fable audit proxy listening on {args.bind}:{args.port} -> https://{UPSTREAM_HOST}")
+
+    if not key_ready.is_set() and args.open_setup:
+        setup_url = f"http://localhost:{args.port}/setup"
+        print(f"  No API key configured. Open {setup_url} to enter your key.")
+        try:
+            subprocess.Popen(["termux-open-url", setup_url],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            pass  # not on Termux
+
     server.serve_forever()
 
 

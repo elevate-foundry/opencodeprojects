@@ -426,18 +426,59 @@ cfg = {}
 if os.path.exists(path):
     with open(path) as f:
         cfg = json.load(f)
-cfg.setdefault("$schema", "https://opencode.ai/config.json")
+cfg["$schema"] = "https://opencode.ai/config.json"
 cfg["model"] = f"anthropic/{model}"
+
+# provider: anthropic via audit proxy
 prov = cfg.setdefault("provider", {}).setdefault("anthropic", {}).setdefault("options", {})
 prov["baseURL"] = f"http://127.0.0.1:{port}"
 prov["apiKey"] = "{env:ANTHROPIC_API_KEY}"
+
+# agent: fable — uses the system prompt, model, and all built-in tools
+cfg["agent"] = {
+    "fable": {
+        "description": "Fable: careful, repo-native coding agent with SOC 2 audit logging",
+        "model": f"anthropic/{model}",
+        "prompt": "prompts/system.md",
+        "tools": {
+            "bash": True,
+            "edit": True,
+            "write": True,
+            "read": True,
+            "grep": True,
+            "glob": True,
+            "apply_patch": True,
+            "webfetch": True,
+            "todowrite": True,
+            "question": True,
+            "skill": True,
+        },
+    }
+}
+cfg["default_agent"] = "fable"
+
+# instructions (global, in addition to the agent prompt)
 instr = cfg.setdefault("instructions", [])
 if "prompts/system.md" not in instr:
     instr.append("prompts/system.md")
+
+# permissions: allow all by default, bash requires approval for safety
+cfg["permission"] = {
+    "read": "allow",
+    "edit": "allow",
+    "grep": "allow",
+    "glob": "allow",
+    "webfetch": "allow",
+    "todowrite": "allow",
+    "question": "allow",
+    "skill": "allow",
+    "bash": "ask",
+}
+
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
     f.write("\n")
-print(f"  wrote {path} (model=anthropic/{model}, baseURL=http://127.0.0.1:{port})")
+print(f"  wrote {path} (default_agent=fable, model=anthropic/{model}, baseURL=http://127.0.0.1:{port})")
 PY
   phase_result "✓" "opencode wired to anthropic via audit proxy"
 }

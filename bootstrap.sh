@@ -440,7 +440,7 @@ phase5b_wiring() {
     resolved_model="$FABLE_MODEL"
     log "  model override: $resolved_model"
   else
-    local tier="${FABLE_MODEL_TIER:-sonnet}"
+    local tier="${FABLE_MODEL_TIER:-fable}"
     log "  querying Anthropic for newest $tier model..."
     resolved_model="$("$PYTHON" - "$tier" <<'PYMODEL'
 import json, sys, urllib.request

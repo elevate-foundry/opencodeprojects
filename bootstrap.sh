@@ -247,68 +247,66 @@ phase1b_python() {
   phase_result "✓" "python + venv"
 }
 
-# ---------- phase 2: opencode install ----------
+# ---------- phase 2: fable build from source ----------
+FABLE_FORK_URL="${FABLE_FORK_URL:-https://github.com/salus-ryan/opencode.git}"
+FABLE_SRC_DIR="$REPO_ROOT/opencode-src"
+
 phase2_opencode() {
-  log "== Phase 4/10: opencode install/verify"
+  log "== Phase 4/10: fable build from source"
   OPENCODE_BIN=""
+
+  # check for existing fable binary first
   if [ "$FORCE_DOWNLOAD" -eq 0 ]; then
-    if command -v opencode >/dev/null 2>&1 && opencode --version >/dev/null 2>&1; then
-      OPENCODE_BIN="$(command -v opencode)"
-    elif [ -x "$INSTALL_DIR/opencode" ] && "$INSTALL_DIR/opencode" --version >/dev/null 2>&1; then
-      OPENCODE_BIN="$INSTALL_DIR/opencode"
+    if command -v fable >/dev/null 2>&1 && fable --version >/dev/null 2>&1; then
+      OPENCODE_BIN="$(command -v fable)"
+    elif [ -x "$INSTALL_DIR/fable" ] && "$INSTALL_DIR/fable" --version >/dev/null 2>&1; then
+      OPENCODE_BIN="$INSTALL_DIR/fable"
     fi
   fi
 
-  if [ -n "$OPENCODE_BIN" ]; then
+  if [ -n "$OPENCODE_BIN" ] && [ "$FORCE_DOWNLOAD" -eq 0 ]; then
     OC_VERSION="$("$OPENCODE_BIN" --version 2>/dev/null | head -1)"
-    log "  existing opencode found: $OPENCODE_BIN ($OC_VERSION) — skipping download"
-    phase_result "✓" "opencode present ($OC_VERSION)"
+    log "  existing fable found: $OPENCODE_BIN ($OC_VERSION) — skipping build"
+    phase_result "✓" "fable present ($OC_VERSION)"
     return
   fi
 
   if [ "$CHECK_ONLY" -eq 1 ]; then
-    log "  [check] opencode not installed; would download opencode-$OC_TARGET.zip"
-    phase_result "✗" "opencode missing (check mode, no install)"
+    log "  [check] fable not installed; would build from source"
+    phase_result "✗" "fable missing (check mode, no build)"
     return
   fi
 
-  need_cmd unzip
-  mkdir -p "$INSTALL_DIR"
-  local tmp zip_url sums_url
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
-  zip_url="https://github.com/sst/opencode/releases/latest/download/opencode-${OC_TARGET}.zip"
-  sums_url="https://github.com/sst/opencode/releases/latest/download/checksums.txt"
-  log "  downloading $zip_url"
-  curl -fSL --proto '=https' --tlsv1.2 -o "$tmp/opencode.zip" "$zip_url" \
-    || die "opencode install" "download failed: $zip_url"
+  # require Go
+  if ! command -v go >/dev/null 2>&1; then
+    die "fable build" "Go is not installed. Install Go 1.22+ from https://go.dev/dl/"
+  fi
+  local go_ver
+  go_ver="$(go version | awk '{print $3}')"
+  log "  go: $go_ver"
 
-  # checksum verification (best-effort: skip with warning if release publishes none)
-  if curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp/checksums.txt" "$sums_url" 2>/dev/null; then
-    local expected actual
-    expected="$(grep "opencode-${OC_TARGET}.zip" "$tmp/checksums.txt" | awk '{print $1}' | head -1 || true)"
-    if [ -n "$expected" ]; then
-      actual="$(sha256sum "$tmp/opencode.zip" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$tmp/opencode.zip" | awk '{print $1}')"
-      [ "$expected" = "$actual" ] || die "opencode install" "SHA256 mismatch: expected $expected got $actual"
-      log "  sha256 verified"
-    else
-      log "  WARNING: checksums.txt has no entry for opencode-${OC_TARGET}.zip; skipping verification"
-    fi
+  # clone or update fork
+  if [ -d "$FABLE_SRC_DIR/.git" ]; then
+    log "  updating fork..."
+    git -C "$FABLE_SRC_DIR" pull --ff-only origin main 2>/dev/null || true
   else
-    log "  WARNING: no checksums.txt published for latest release; skipping verification"
+    log "  cloning fork from $FABLE_FORK_URL..."
+    git clone "$FABLE_FORK_URL" "$FABLE_SRC_DIR" \
+      || die "fable build" "git clone failed"
   fi
 
-  unzip -oq "$tmp/opencode.zip" -d "$tmp/extract"
-  local bin
-  bin="$(find "$tmp/extract" -type f -name opencode | head -1)"
-  [ -n "$bin" ] || die "opencode install" "opencode binary not found inside zip"
-  install -m 0755 "$bin" "$INSTALL_DIR/opencode"
-  OPENCODE_BIN="$INSTALL_DIR/opencode"
+  # build
+  log "  building fable..."
+  mkdir -p "$INSTALL_DIR"
+  (cd "$FABLE_SRC_DIR" && go build -o "$INSTALL_DIR/fable" .) \
+    || die "fable build" "go build failed"
+
+  OPENCODE_BIN="$INSTALL_DIR/fable"
   OC_VERSION="$("$OPENCODE_BIN" --version 2>/dev/null | head -1)"
-  [ -n "$OC_VERSION" ] || die "opencode install" "installed binary failed --version"
+  [ -n "$OC_VERSION" ] || die "fable build" "built binary failed --version"
   case ":$PATH:" in *":$INSTALL_DIR:"*) ;; *) log "  NOTE: add $INSTALL_DIR to PATH";; esac
-  log "  installed opencode $OC_VERSION -> $OPENCODE_BIN"
-  phase_result "✓" "opencode installed ($OC_VERSION)"
+  log "  built fable $OC_VERSION -> $OPENCODE_BIN"
+  phase_result "✓" "fable built ($OC_VERSION)"
 }
 
 # ---------- phase 3: credential verification ----------
@@ -570,7 +568,7 @@ phase7_smoke() {
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -H "anthropic-version: 2023-06-01" \
     -H "content-type: application/json" \
-    -d "{\"model\":\"${FABLE_MODEL:-claude-sonnet-4-5}\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"smoke: reply ok\"}]}" \
+    -d "{\"model\":\"${FABLE_MODEL:-claude-fable-5}\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"smoke: reply ok\"}]}" \
     "http://127.0.0.1:${FABLE_PROXY_PORT:-8377}/v1/messages")"
   [ "$status" = "200" ] || die "smoke test" "proxied request failed: HTTP $status"
   after="$(cat "$FABLE_AUDIT_DIR"/audit-*.jsonl 2>/dev/null | wc -l)"
@@ -620,7 +618,7 @@ main() {
     log "Done (check mode). Run ./bootstrap.sh to provision for real."
   else
     log "Launching Fable..."
-    exec opencode
+    exec "$OPENCODE_BIN"
   fi
 }
 main

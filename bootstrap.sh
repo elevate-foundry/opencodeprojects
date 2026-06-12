@@ -589,7 +589,12 @@ main() {
   write_state
   print_summary
   log ""
-  log "Done. Run: opencode   (config: $REPO_ROOT/opencode.json, audit: \${FABLE_AUDIT_DIR:-$FABLE_HOME/audit})"
-  log "Audit CLI: ./bin/fable-audit tail | verify | export | rotate"
+  log "Audit CLI: ./bin/fable-audit tail | verify | export | rotate | tokens"
+  if [ "$CHECK_ONLY" -eq 1 ]; then
+    log "Done (check mode). Run ./bootstrap.sh to provision for real."
+  else
+    log "Launching Fable..."
+    exec opencode
+  fi
 }
 main

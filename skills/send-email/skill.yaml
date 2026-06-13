@@ -1,0 +1,24 @@
+name: send-email
+version: 0.1.0
+description: Send email via SMTP (stdlib smtplib, TLS). Credentials in ~/.fable/smtp.env. Body via arg or stdin.
+entrypoint: send-email.py
+usage: "send-email.py <to> <subject> <body|->"
+triggers: ["send email", "email me", "mail this"]
+requirements: {bins: [python3], files: [~/.fable/smtp.env]}
+interactive: false
+
+permissions:
+  network: true            # SMTP host only
+  llm: false
+  filesystem_write: false
+  shell_exec: false
+  contacts: false
+  messaging: true          # outbound email
+
+budget:
+  max_body_chars: 10000    # EMAIL_MAX_BODY_CHARS
+
+audit:
+  log_prompts: false
+  log_cost: false
+  require_human_confirmation_for: []

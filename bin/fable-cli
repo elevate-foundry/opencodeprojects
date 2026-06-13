@@ -20,7 +20,7 @@ from pathlib import Path
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
+DEFAULT_MODEL = "claude-opus-4"
 MAX_TOKENS = 8192
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"

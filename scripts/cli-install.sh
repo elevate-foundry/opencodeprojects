@@ -39,11 +39,13 @@ PYTHON="$(command -v python3 || command -v python)"
 echo "[2/5] Getting the repo..."
 if [ -d "$INSTALL_DIR/.git" ]; then
   echo "  updating $INSTALL_DIR from $REPO_URL"
-  # Pull directly from REPO_URL so we don't depend on whatever 'origin'
-  # points at (an existing clone may track the upstream that lacks fable-cli).
+  # Fetch directly from REPO_URL (don't trust existing 'origin', which may
+  # track an upstream that lacks fable-cli) and hard-reset the working tree
+  # to match it exactly. This is an installer; local edits to tracked files
+  # are intentionally discarded. (.env and opencode.json are gitignored and
+  # therefore preserved.)
   git -C "$INSTALL_DIR" fetch "$REPO_URL" main
-  git -C "$INSTALL_DIR" merge --ff-only FETCH_HEAD 2>/dev/null || \
-    git -C "$INSTALL_DIR" reset --hard FETCH_HEAD
+  git -C "$INSTALL_DIR" reset --hard FETCH_HEAD
 else
   echo "  cloning into $INSTALL_DIR"
   git clone "$REPO_URL" "$INSTALL_DIR"

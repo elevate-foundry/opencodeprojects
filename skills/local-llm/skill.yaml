@@ -1,0 +1,25 @@
+name: local-llm
+version: 0.1.0
+description: On-device LLM with true speculative decoding - SmolLM2-360M drafts for SmolLM2-1.7B via llama-server. Zero API cost, works offline.
+entrypoint: local-llm.sh
+usage: "local-llm.sh --start | --stop | --status | \"<prompt>\" [max_tokens]"
+triggers: ["offline answer", "free local query", "no-cost llm"]
+requirements: {bins: [llama-server, python3], files: [~/models/SmolLM2-1.7B-Instruct-Q4_K_M.gguf, ~/models/SmolLM2-360M-Instruct-Q4_K_M.gguf]}
+interactive: false
+
+permissions:
+  network: false           # localhost only
+  llm: true                # local inference
+  filesystem_write: true   # ~/.fable/llama-server.log only
+  shell_exec: false
+  contacts: false
+  messaging: false
+
+budget:
+  max_tokens: 300          # LOCAL_LLM_MAX_TOKENS
+  # no cost caps needed: inference is free/on-device; battery is the budget
+
+audit:
+  log_prompts: false       # does not transit audit proxy (local only)
+  log_cost: false
+  require_human_confirmation_for: []

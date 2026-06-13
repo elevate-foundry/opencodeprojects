@@ -1,0 +1,26 @@
+name: cascade
+version: 0.1.0
+description: Speculative-decoding-style model cascade - Haiku drafts with self-rated confidence; low confidence escalates to Sonnet. ~10x cheaper than always-big.
+entrypoint: cascade.py
+usage: "cascade.py [--force-big] [--threshold N] \"<prompt>\""
+triggers: ["quick answer", "cheap query", "cascade this"]
+requirements: {bins: [python3], files: [~/opencodeprojects/.env], services: [audit-proxy:8377]}
+interactive: false
+
+permissions:
+  network: true
+  llm: true
+  filesystem_write: true   # ~/.fable/cascade-history.jsonl only
+  shell_exec: false
+  contacts: false
+  messaging: false
+
+budget:
+  max_tokens: 1500         # CASCADE_MAX_TOKENS
+  max_cost_usd: 0.50       # CASCADE_MAX_COST_USD
+  threshold: 7             # CASCADE_THRESHOLD
+
+audit:
+  log_prompts: true
+  log_cost: true
+  require_human_confirmation_for: []

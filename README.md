@@ -3,6 +3,11 @@
 One command provisions opencode + Anthropic ("Fable") with SOC 2-aligned audit logging.
 Full spec: [PRD.md](PRD.md). Prompt architecture notes: [build.md](build.md).
 
+> **Note (2026-06-12):** The original `claude-fable-5` model was suspended by a US
+> government export-control directive and now 404s. The system was migrated to
+> `claude-opus-4` (coder) / `claude-sonnet-4`. See
+> [docs/MIGRATION-fable5.md](docs/MIGRATION-fable5.md) for details and sources.
+
 ## Quickstart
 
 ```bash

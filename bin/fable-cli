@@ -20,10 +20,27 @@ from pathlib import Path
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-DEFAULT_MODEL = "claude-opus-4"
+DEFAULT_MODEL = "claude-opus-4-8"
 MAX_TOKENS = 8192
-API_URL = "https://api.anthropic.com/v1/messages"
+API_BASE = "https://api.anthropic.com"
 API_VERSION = "2023-06-01"
+
+
+def resolve_base_url():
+    """Resolve the API base URL, ignoring stale localhost proxies.
+
+    A common footgun: ANTHROPIC_BASE_URL gets left pointing at a dead local
+    audit proxy (127.0.0.1:8377). If that's the case, ignore it and go direct
+    to the public API so the agent never silently dies on a dead proxy.
+    """
+    base = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+    if not base:
+        return API_BASE
+    if "127.0.0.1" in base or "localhost" in base or "0.0.0.0" in base:
+        print(f"  [warn] ignoring localhost ANTHROPIC_BASE_URL ({base}); using {API_BASE}",
+              file=sys.stderr)
+        return API_BASE
+    return base.rstrip("/")
 
 # ─── .env loader ─────────────────────────────────────────────────────────────
 
@@ -208,8 +225,7 @@ def api_call(messages, model, system=None):
 
     data = json.dumps(body).encode()
     req = urllib.request.Request(
-        os.environ.get("ANTHROPIC_BASE_URL", API_URL).rstrip("/") + "/v1/messages"
-        if "ANTHROPIC_BASE_URL" in os.environ else API_URL,
+        resolve_base_url() + "/v1/messages",
         data=data,
         headers={
             "x-api-key": api_key,

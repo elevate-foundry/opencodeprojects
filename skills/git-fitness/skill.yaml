@@ -1,0 +1,26 @@
+name: git-fitness
+version: 0.1.0
+description: Gated auto commit+push - only pushes if diff passes fitness checks (syntax, secret scan, forbidden paths, size caps, manifest validation). Never force-pushes.
+entrypoint: git-fitness.sh
+usage: "git-fitness.sh [--repo <path>] [--dry-run] [--no-push] [\"commit message\"]"
+triggers: ["auto push", "push if healthy", "fitness push", "safe commit"]
+requirements: {bins: [git, python3], files: [~/.fable/.gh_token]}
+interactive: false
+
+permissions:
+  network: true            # git push to origin only
+  llm: false
+  filesystem_write: true   # repo working tree + .git only
+  shell_exec: true         # git, py_compile, bash -n
+  contacts: false
+  messaging: false
+
+budget:
+  max_diff_lines: 2000     # GITFIT_MAX_DIFF_LINES
+  max_files: 40            # GITFIT_MAX_FILES
+
+audit:
+  log_prompts: false
+  log_cost: false
+  require_human_confirmation_for:
+    - push

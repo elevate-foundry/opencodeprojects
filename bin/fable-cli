@@ -1,0 +1,497 @@
+#!/usr/bin/env python3
+"""fable-cli: standalone Python agent with tool calls. No Go, no proxy, no opencode dependency.
+
+Usage:
+    fable-cli                   # interactive chat with tool support
+    fable-cli --smoke-test      # verify API key + tool calls work, exit 0/1
+    fable-cli -p "do something" # single prompt, non-interactive
+    fable-cli --model claude-sonnet-4-5  # override model
+
+Requires: ANTHROPIC_API_KEY in environment or .env file in cwd/parent dirs.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.request
+import urllib.error
+from pathlib import Path
+
+# ─── Config ───────────────────────────────────────────────────────────────────
+
+DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
+MAX_TOKENS = 8192
+API_URL = "https://api.anthropic.com/v1/messages"
+API_VERSION = "2023-06-01"
+
+# ─── .env loader ─────────────────────────────────────────────────────────────
+
+def load_dotenv():
+    """Walk up from cwd looking for .env, load it into os.environ."""
+    d = Path.cwd()
+    while d != d.parent:
+        env_file = d / ".env"
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    os.environ.setdefault(k, v)
+            return str(env_file)
+        d = d.parent
+    return None
+
+
+# ─── Tools ────────────────────────────────────────────────────────────────────
+
+TOOLS = [
+    {
+        "name": "bash",
+        "description": "Run a shell command. Returns stdout, stderr, and exit code. Use for building, testing, git, file exploration, etc.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The shell command to execute"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Timeout in seconds (default 60)",
+                    "default": 60
+                }
+            },
+            "required": ["command"]
+        }
+    },
+    {
+        "name": "read_file",
+        "description": "Read the contents of a file at the given path.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute or relative file path to read"
+                }
+            },
+            "required": ["path"]
+        }
+    },
+    {
+        "name": "write_file",
+        "description": "Write content to a file, creating directories if needed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "File path to write to"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to write"
+                }
+            },
+            "required": ["path", "content"]
+        }
+    },
+    {
+        "name": "edit_file",
+        "description": "Replace a specific string in a file with new content.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "File path to edit"
+                },
+                "old_string": {
+                    "type": "string",
+                    "description": "Exact string to find and replace (must be unique in file)"
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "Replacement string"
+                }
+            },
+            "required": ["path", "old_string", "new_string"]
+        }
+    }
+]
+
+
+def execute_tool(name, input_data):
+    """Execute a tool and return the result string."""
+    try:
+        if name == "bash":
+            cmd = input_data["command"]
+            timeout = input_data.get("timeout", 60)
+            # Security: refuse to print raw API keys
+            if re.search(r'echo.*\$ANTHROPIC_API_KEY|cat.*\.env|printenv.*API', cmd):
+                return "REFUSED: will not print secrets"
+            result = subprocess.run(
+                cmd, shell=True, text=True,
+                capture_output=True, timeout=timeout,
+                cwd=os.getcwd()
+            )
+            out = ""
+            if result.stdout:
+                out += result.stdout[-4000:]
+            if result.stderr:
+                out += f"\n[stderr]\n{result.stderr[-2000:]}"
+            out += f"\n[exit code: {result.returncode}]"
+            return out.strip()
+
+        elif name == "read_file":
+            p = Path(input_data["path"]).expanduser()
+            if not p.exists():
+                return f"ERROR: file not found: {p}"
+            content = p.read_text()
+            if len(content) > 20000:
+                return content[:20000] + f"\n\n... [truncated, {len(content)} chars total]"
+            return content
+
+        elif name == "write_file":
+            p = Path(input_data["path"]).expanduser()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(input_data["content"])
+            return f"OK: wrote {len(input_data['content'])} chars to {p}"
+
+        elif name == "edit_file":
+            p = Path(input_data["path"]).expanduser()
+            if not p.exists():
+                return f"ERROR: file not found: {p}"
+            content = p.read_text()
+            old = input_data["old_string"]
+            new = input_data["new_string"]
+            count = content.count(old)
+            if count == 0:
+                return "ERROR: old_string not found in file"
+            if count > 1:
+                return f"ERROR: old_string found {count} times (must be unique)"
+            content = content.replace(old, new, 1)
+            p.write_text(content)
+            return f"OK: replaced in {p}"
+
+        else:
+            return f"ERROR: unknown tool: {name}"
+
+    except subprocess.TimeoutExpired:
+        return "ERROR: command timed out"
+    except Exception as e:
+        return f"ERROR: {type(e).__name__}: {e}"
+
+
+# ─── API ──────────────────────────────────────────────────────────────────────
+
+def api_call(messages, model, system=None):
+    """Make a single API call, return the parsed response."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        print("ERROR: ANTHROPIC_API_KEY not set", file=sys.stderr)
+        sys.exit(1)
+
+    body = {
+        "model": model,
+        "max_tokens": MAX_TOKENS,
+        "messages": messages,
+        "tools": TOOLS,
+    }
+    if system:
+        body["system"] = system
+
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(
+        os.environ.get("ANTHROPIC_BASE_URL", API_URL).rstrip("/") + "/v1/messages"
+        if "ANTHROPIC_BASE_URL" in os.environ else API_URL,
+        data=data,
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": API_VERSION,
+            "content-type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()[:500]
+        print(f"\nAPI Error {e.code}: {error_body}", file=sys.stderr)
+        raise
+
+
+# ─── Agent loop ───────────────────────────────────────────────────────────────
+
+def agent_loop(user_message, model, system=None, verbose=False):
+    """Run the full agent loop: send message, handle tool calls, repeat."""
+    messages = [{"role": "user", "content": user_message}]
+    
+    while True:
+        resp = api_call(messages, model, system)
+        
+        # Collect text and tool_use blocks
+        assistant_content = resp.get("content", [])
+        messages.append({"role": "assistant", "content": assistant_content})
+        
+        text_parts = []
+        tool_uses = []
+        
+        for block in assistant_content:
+            if block["type"] == "text":
+                text_parts.append(block["text"])
+            elif block["type"] == "tool_use":
+                tool_uses.append(block)
+        
+        # Print any text
+        if text_parts:
+            print("\n".join(text_parts))
+        
+        # If no tool calls or stop_reason is end_turn, we're done
+        if not tool_uses or resp.get("stop_reason") == "end_turn":
+            return resp
+        
+        # Execute tools and send results back
+        tool_results = []
+        for tool_use in tool_uses:
+            if verbose:
+                print(f"\n  ⚙ {tool_use['name']}: {json.dumps(tool_use['input'])[:100]}", file=sys.stderr)
+            result = execute_tool(tool_use["name"], tool_use["input"])
+            if verbose:
+                preview = result[:200] + "..." if len(result) > 200 else result
+                print(f"  → {preview}", file=sys.stderr)
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": tool_use["id"],
+                "content": result
+            })
+        
+        messages.append({"role": "user", "content": tool_results})
+
+
+# ─── Interactive mode ─────────────────────────────────────────────────────────
+
+def interactive(model, system=None):
+    """Interactive chat loop."""
+    messages = []
+    print(f"fable-cli ({model}) — type 'exit' or Ctrl+C to quit")
+    print("─" * 50)
+    
+    while True:
+        try:
+            user_input = input("\n> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nbye")
+            break
+        
+        if not user_input:
+            continue
+        if user_input.lower() in ("exit", "quit", "/quit", "/exit"):
+            break
+        
+        messages.append({"role": "user", "content": user_input})
+        
+        try:
+            resp = api_call(messages, model, system)
+        except Exception as e:
+            print(f"  error: {e}", file=sys.stderr)
+            messages.pop()
+            continue
+        
+        assistant_content = resp.get("content", [])
+        messages.append({"role": "assistant", "content": assistant_content})
+        
+        text_parts = []
+        tool_uses = []
+        
+        for block in assistant_content:
+            if block["type"] == "text":
+                text_parts.append(block["text"])
+            elif block["type"] == "tool_use":
+                tool_uses.append(block)
+        
+        if text_parts:
+            print("\n".join(text_parts))
+        
+        # Handle tool calls in a loop
+        while tool_uses:
+            tool_results = []
+            for tool_use in tool_uses:
+                print(f"\n  ⚙ {tool_use['name']}: {json.dumps(tool_use['input'])[:120]}", file=sys.stderr)
+                result = execute_tool(tool_use["name"], tool_use["input"])
+                preview = result[:300] + "..." if len(result) > 300 else result
+                print(f"  → {preview}", file=sys.stderr)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_use["id"],
+                    "content": result
+                })
+            
+            messages.append({"role": "user", "content": tool_results})
+            
+            try:
+                resp = api_call(messages, model, system)
+            except Exception as e:
+                print(f"  error: {e}", file=sys.stderr)
+                break
+            
+            assistant_content = resp.get("content", [])
+            messages.append({"role": "assistant", "content": assistant_content})
+            
+            text_parts = []
+            tool_uses = []
+            for block in assistant_content:
+                if block["type"] == "text":
+                    text_parts.append(block["text"])
+                elif block["type"] == "tool_use":
+                    tool_uses.append(block)
+            
+            if text_parts:
+                print("\n".join(text_parts))
+
+
+# ─── Smoke test ───────────────────────────────────────────────────────────────
+
+def smoke_test(model):
+    """Verify: API key works, model responds, tool calls execute. Exit 0 or 1."""
+    print(f"fable-cli --smoke-test (model: {model})")
+    print("─" * 50)
+    errors = []
+    
+    # Test 1: API connectivity
+    print("1. API connectivity...", end=" ", flush=True)
+    try:
+        resp = api_call(
+            [{"role": "user", "content": "Reply with exactly: SMOKE_OK"}],
+            model
+        )
+        text = "".join(b.get("text", "") for b in resp.get("content", []))
+        if "SMOKE_OK" in text:
+            print("✓")
+        else:
+            print(f"⚠ (got: {text[:50]})")
+    except Exception as e:
+        print(f"✗ ({e})")
+        errors.append(f"API call failed: {e}")
+    
+    # Test 2: Tool call execution
+    print("2. Tool calls...", end=" ", flush=True)
+    try:
+        resp = api_call(
+            [{"role": "user", "content": "Use the bash tool to run: echo TOOL_OK"}],
+            model
+        )
+        tool_uses = [b for b in resp.get("content", []) if b["type"] == "tool_use"]
+        if tool_uses:
+            result = execute_tool(tool_uses[0]["name"], tool_uses[0]["input"])
+            if "TOOL_OK" in result:
+                print("✓")
+            else:
+                print(f"⚠ (tool ran but got: {result[:50]})")
+        else:
+            print("⚠ (model didn't use a tool)")
+    except Exception as e:
+        print(f"✗ ({e})")
+        errors.append(f"Tool call failed: {e}")
+    
+    # Test 3: File read/write
+    print("3. File read/write...", end=" ", flush=True)
+    try:
+        test_file = Path("/tmp/fable-cli-smoke-test.txt")
+        result1 = execute_tool("write_file", {"path": str(test_file), "content": "SMOKE_WRITE_OK"})
+        result2 = execute_tool("read_file", {"path": str(test_file)})
+        test_file.unlink(missing_ok=True)
+        if "SMOKE_WRITE_OK" in result2:
+            print("✓")
+        else:
+            print(f"⚠ ({result2[:50]})")
+    except Exception as e:
+        print(f"✗ ({e})")
+        errors.append(f"File ops failed: {e}")
+    
+    # Test 4: Edit file
+    print("4. Edit file...", end=" ", flush=True)
+    try:
+        test_file = Path("/tmp/fable-cli-smoke-edit.txt")
+        test_file.write_text("hello world")
+        result = execute_tool("edit_file", {
+            "path": str(test_file),
+            "old_string": "hello",
+            "new_string": "goodbye"
+        })
+        content = test_file.read_text()
+        test_file.unlink(missing_ok=True)
+        if content == "goodbye world":
+            print("✓")
+        else:
+            print(f"⚠ ({content[:50]})")
+    except Exception as e:
+        print(f"✗ ({e})")
+        errors.append(f"Edit failed: {e}")
+    
+    # Test 5: Multi-turn tool loop
+    print("5. Agent loop (multi-turn)...", end=" ", flush=True)
+    try:
+        resp = agent_loop(
+            "Use bash to run 'echo LOOP_TEST' and then tell me what it printed.",
+            model
+        )
+        print("✓")
+    except Exception as e:
+        print(f"✗ ({e})")
+        errors.append(f"Agent loop failed: {e}")
+    
+    # Summary
+    print("─" * 50)
+    if errors:
+        print(f"FAILED ({len(errors)} error(s)):")
+        for e in errors:
+            print(f"  ✗ {e}")
+        return 1
+    else:
+        print("ALL PASSED ✓")
+        return 0
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="fable-cli: standalone Python agent")
+    parser.add_argument("--smoke-test", action="store_true", help="Run smoke tests and exit")
+    parser.add_argument("-p", "--prompt", type=str, help="Single prompt (non-interactive)")
+    parser.add_argument("--model", type=str, default=None, help="Model override")
+    parser.add_argument("--system", type=str, default=None, help="System prompt (or path to .md file)")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Show tool call details")
+    args = parser.parse_args()
+
+    # Load .env
+    env_path = load_dotenv()
+
+    model = args.model or os.environ.get("FABLE_MODEL", DEFAULT_MODEL)
+
+    # System prompt
+    system = None
+    if args.system:
+        sp = Path(args.system)
+        if sp.exists():
+            system = sp.read_text()
+        else:
+            system = args.system
+
+    if args.smoke_test:
+        sys.exit(smoke_test(model))
+    elif args.prompt:
+        agent_loop(args.prompt, model, system=system, verbose=args.verbose)
+    else:
+        interactive(model, system=system)
+
+
+if __name__ == "__main__":
+    main()

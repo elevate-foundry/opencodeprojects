@@ -1,0 +1,21 @@
+name: bbid
+version: 0.1.0
+description: BBID-style explicit identity - device + behavioral fingerprint hashed, braille-encoded, logged to bbid-sessions.jsonl. Every signal shown; nothing covert.
+entrypoint: bbid.py
+usage: "bbid.py [--quiet | --device]"
+triggers: ["who am i", "session identity", "device fingerprint"]
+requirements: {bins: [python3]}
+interactive: false
+
+permissions:
+  network: false
+  llm: false
+  filesystem_write: true   # ~/.fable/bbid-sessions.jsonl only
+  shell_exec: true         # getprop/df/nproc reads
+  contacts: false
+  messaging: false
+
+audit:
+  log_prompts: false
+  log_cost: false
+  require_human_confirmation_for: []

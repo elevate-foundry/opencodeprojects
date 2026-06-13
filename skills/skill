@@ -78,21 +78,30 @@ case "${1:-list}" in
         echo "[governor] $env=$val" >&2
       fi
     done < <(yamlblock "$m" budget | grep ':' || true)
-    # 3. confirmation gate
+    # 3a. biometric gate (require_biometric_for) — termux-fingerprint or passphrase via bio-gate
+    bios=$(yamlblock "$m" audit | awk '/require_biometric_for:/{f=1;next} f&&/^[ ]*-/{print $2} f&&!/^[ ]*-/{f=0}' || true)
+    if [ -n "$bios" ]; then
+      gate="$SKILLS_DIR/bio-gate/bio-gate.sh"
+      [ -x "$gate" ] || { echo "[governor] '$name' requires biometric gate but bio-gate skill not installed"; exit 1; }
+      "$gate" "skill '$name':$(echo $bios | tr '\n' ' ')" || { echo "[governor] biometric denied"; exit 1; }
+    fi
+    # 3b. confirmation gate
     confirms=$(yamlblock "$m" audit | awk '/require_human_confirmation_for:/{f=1;next} f&&/^[ ]*-/{print $2} f&&!/^[ ]*-/{f=0}' || true)
     if [ -n "$confirms" ]; then
       echo "[governor] '$name' requires confirmation for:$(echo $confirms | tr '\n' ' ')" >&2
       printf "[governor] proceed? [y/N] " >&2; read -r ans
       [ "$ans" = "y" ] || { echo "[governor] denied"; exit 1; }
     fi
-    # 4. audited execution
+    # 4. audited execution (bound to BBID session identity when available)
+    bbid=""
+    [ -x "$SKILLS_DIR/bbid/bbid.py" ] && bbid=$(python3 "$SKILLS_DIR/bbid/bbid.py" --quiet 2>/dev/null || true)
     start=$(date +%s); ts=$(date -u +%Y-%m-%dT%H:%M:%SZ); rc=0
     "$dir/$entry" "$@" || rc=$?
     dur=$(( $(date +%s) - start ))
-    printf '{"ts":"%s","skill":"%s","version":"%s","args":%s,"exit":%d,"duration_s":%d}\n' \
+    printf '{"ts":"%s","skill":"%s","version":"%s","args":%s,"exit":%d,"duration_s":%d,"bbid":"%s"}\n' \
       "$ts" "$name" "$(yamlval "$m" version)" \
       "$(printf '%s' "$*" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
-      "$rc" "$dur" >> "$RUN_LOG"
+      "$rc" "$dur" "$bbid" >> "$RUN_LOG"
     exit $rc
     ;;
   *)

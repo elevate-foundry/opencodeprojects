@@ -1,0 +1,21 @@
+name: bio-gate
+version: 0.1.0
+description: Human-presence gate - BiometricPrompt via termux-fingerprint when available, passphrase-hash fallback. Used by skill CLI for require_biometric_for actions.
+entrypoint: bio-gate.sh
+usage: "bio-gate.sh [\"reason\"] | bio-gate.sh --enroll"
+triggers: ["biometric gate", "confirm with fingerprint"]
+requirements: {bins: [sha256sum]}
+interactive: true
+
+permissions:
+  network: false
+  llm: false
+  filesystem_write: true   # ~/.fable/.gate_secret only
+  shell_exec: false
+  contacts: false
+  messaging: false
+
+audit:
+  log_prompts: false
+  log_cost: false
+  require_human_confirmation_for: []

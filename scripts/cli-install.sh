@@ -38,12 +38,22 @@ PYTHON="$(command -v python3 || command -v python)"
 # Step 2: clone or update
 echo "[2/5] Getting the repo..."
 if [ -d "$INSTALL_DIR/.git" ]; then
-  echo "  updating $INSTALL_DIR"
-  git -C "$INSTALL_DIR" pull --ff-only origin main 2>/dev/null || \
-    git -C "$INSTALL_DIR" pull origin main || true
+  echo "  updating $INSTALL_DIR from $REPO_URL"
+  # Pull directly from REPO_URL so we don't depend on whatever 'origin'
+  # points at (an existing clone may track the upstream that lacks fable-cli).
+  git -C "$INSTALL_DIR" fetch "$REPO_URL" main
+  git -C "$INSTALL_DIR" merge --ff-only FETCH_HEAD 2>/dev/null || \
+    git -C "$INSTALL_DIR" reset --hard FETCH_HEAD
 else
   echo "  cloning into $INSTALL_DIR"
   git clone "$REPO_URL" "$INSTALL_DIR"
+fi
+
+# Sanity: confirm fable-cli actually exists after sync
+if [ ! -f "$INSTALL_DIR/bin/fable-cli" ]; then
+  echo "ERROR: bin/fable-cli missing after sync — repo may be wrong." >&2
+  echo "  Try: rm -rf $INSTALL_DIR  and re-run this installer." >&2
+  exit 1
 fi
 
 # Step 3: ensure .env has a key

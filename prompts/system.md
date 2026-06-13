@@ -1,4 +1,4 @@
-<!-- AUTO-ASSEMBLED by scripts/assemble-prompt.sh at 2026-06-12T23:56:56Z -->
+<!-- AUTO-ASSEMBLED by scripts/assemble-prompt.sh at 2026-06-13T01:24:23Z -->
 
 # STATIC CORE
 
@@ -109,12 +109,23 @@ Use them. Do not re-ask questions answered here.
 - swarm 0.2.0 has the governor: hard caps (3 agents, 1200 tok/agent, $0.25/run, $2/day from swarm-history.jsonl cost field), env-overridable via SWARM_* vars. skill.yaml permissions/budget/audit blocks are the template for all future skills. Verified run cost ~$0.001 vs $3.61 for an opencode session — push routine queries to swarm, not full sessions.
 - `skill run <name>` is the governed execution path (commit 4439a75): bin checks -> budget block env injection (format: `key: value  # ENV_NAME`) -> confirmation gate (audit.require_human_confirmation_for) -> run -> append to ~/.fable/skill-runs.jsonl. Always prefer `skill run` over direct entrypoint invocation.
 
+## 2026-06-13 — local model footgun
+- llama-cli/llama-server with SmolLM2-1.7B Q4_K_M on S25 is too slow for interactive use (~minutes per short prompt, 100% CPU, 2.6GB+ RAM). Caused an apparent "infinite loop" hang on 2026-06-12 — the session was just blocked on an untimed llama-cli call.
+- Rule: ALWAYS wrap local-model invocations in `timeout` and run as background with output to file, never inline in a tool call.
+- A llama-server had also auto-spawned and was killed; check `ps aux | grep llama` after any local-model experiments.
+- Stale fable TUI instances accumulate across terminals (pts/0, pts/1...) holding 150MB+ each; kill old ones when investigating resource issues.
+- git-fitness skill shipped (f0627f8): `skill run git-fitness --repo <path> "msg"` — gated commit+push. Checks: branch allowlist (main/master), file/diff caps, forbidden paths (.env/keys/tokens), secret-pattern scan, py/sh/json syntax compile, skill.yaml manifest validation. Never force-pushes; push needs governor confirmation. Env overrides: GITFIT_MAX_DIFF_LINES/MAX_FILES/BRANCHES/NAME/EMAIL/TOKEN_FILE. Used it to push itself.
+- Identity layer shipped (ccedf58): bio-gate skill (termux-fingerprint BiometricPrompt; passphrase-hash fallback at ~/.fable/.gate_secret since Play Store Termux lacks Termux:API — user must run bio-gate.sh --enroll once). bbid skill = explicit BBID device+behavior hash, braille-encoded, ~/.fable/bbid-sessions.jsonl. `skill run` now honors audit.require_biometric_for and stamps every run-log entry with bbid session id. Device hash stable: 49e095f2c620bdb1… (SM-S936U). User's elevate-foundry GH account has the original BBID/braille repos (bbid-challenge, sal-auth, bbid-spec) — this is the on-device realization of that thesis.
+- Auto-compaction shipped (opencode-src c880762): maybeAutoCompact() after each completed response — fires Summarize() when PromptTokens+CompletionTokens > 80% of model ContextWindow. Env: OPENCODE_AUTOCOMPACT_RATIO (0=off). Theory: compact rarely (high threshold) because each compaction invalidates the prompt-cache prefix (~$0.50 cache-write hit); cache reads are already 10x cheaper than fresh input. Rebuild fable (cd opencode-src && go build -o ~/.local/bin/fable) to activate — current running binary predates it.
+- API spend check: parse ~/.fable/audit/*.jsonl api_response events w/ usage fields. Day 1 total ≈$9.08 (269 main-agent calls, 13.5M cache-read tokens — caching saved ~$35). claude-fable-5 = proxy alias for sonnet-4-5.
+- Ghost-text prediction shipped (opencode-src 3b92924): editor predicts rest of user's message via haiku draft model, muted-gray italic inline, Tab accepts, typing invalidates. 500ms debounce + seq numbers; single-line only; routes through ANTHROPIC_BASE_URL (audit proxy). Env: OPENCODE_GHOST_DISABLE, OPENCODE_GHOST_MODEL. Cost ~$0.0001/suggestion. New binary staged at ~/.local/bin/fable.new — running fable can't self-replace; user swaps when session ends (mv fable.new fable).
+
 
 # SESSION PREFLIGHT
 
 ```
 SESSION PREFLIGHT
-timestamp_utc=2026-06-12T23:56:56Z
+timestamp_utc=2026-06-13T01:24:23Z
 user=u0_a482
 hostname=localhost
 home=/data/data/com.termux/files/home
@@ -122,11 +133,10 @@ pwd=/data/data/com.termux/files/home/opencodeprojects
 form_factor=mobile
 git_root=/data/data/com.termux/files/home/opencodeprojects
 git_branch=main
-git_commit=4439a752a4f9334734641e4d914df56ae2fc6d1e
+git_commit=ccedf58f88b5107f4dc45a284aa724b19c2fd0cd
 git_dirty=true
 git_status_porcelain<<EOF
  M prompts/system.md
-?? skills/cascade/
 EOF
 top_level_files<<EOF
 .
@@ -181,8 +191,13 @@ scripts/preflight.sh
 scripts/repo-manifest.sh
 scripts/termux-install.sh
 skills
+skills/bbid
+skills/bio-gate
 skills/boot-persist
 skills/cascade
+skills/git-fitness
+skills/local-llm
+skills/send-email
 skills/send-text
 skills/skill
 skills/swarm
@@ -200,6 +215,11 @@ detected_manifests<<EOF
 EOF
 ```
 
-# SESSION HISTORY
+# SESSION HISTORY (recent sessions)
 
-No previous sessions recorded yet.
+# 2026-06-13 — identity layer, compaction, ghost text
+Diagnosed "infinite loop" = untimed llama-cli hang (killed it + llama-server + 2 stale fable instances).
+Shipped: git-fitness (gated auto-push, used for all pushes since), send-email (SMTP, awaiting ~/.fable/smtp.env creds), bio-gate (passphrase fallback, needs --enroll), bbid (explicit device+behavior identity, braille-encoded, stamps skill-runs).
+opencode-src: auto-compaction at 80% context (c880762), ghost-text input prediction via haiku (3b92924). Binary staged at ~/.local/bin/fable.new — swap pending restart.
+Open: smtp.env creds, bio-gate enroll, API spend day-1 ≈ $9.08.
+

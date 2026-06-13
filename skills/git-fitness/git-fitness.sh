@@ -125,3 +125,15 @@ else
   git push origin "$branch" || { echo "FAIL: push failed"; exit 1; }
 fi
 echo "pushed: origin/$branch"
+
+# ---- post-push: auto-rebuild fable if opencode-src changed ----
+if [ "${GITFIT_REBUILD:-1}" -eq 1 ] && [ -d "$REPO/opencode-src" ] \
+  && printf '%s\n' "${files[@]}" | grep -q '^opencode-src/'; then
+  echo "opencode-src changed — rebuilding fable"
+  if (cd "$REPO/opencode-src" && go build -o "$HOME/.local/bin/fable.new" .); then
+    mv "$HOME/.local/bin/fable.new" "$HOME/.local/bin/fable"
+    echo "rebuilt+swapped ~/.local/bin/fable (running instances keep old inode; new code on next launch)"
+  else
+    echo "WARN: rebuild failed — binary unchanged"
+  fi
+fi
